@@ -1,0 +1,14 @@
+# Dev/test-only Modbus TCP simulator, used to exercise the acquisition
+# engine without physical hardware. Not part of the production gateway image.
+FROM golang:1.25-alpine AS build
+
+WORKDIR /app
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/modbus-sim ./cmd/modbus-sim
+
+FROM alpine:3.20
+COPY --from=build /out/modbus-sim /modbus-sim
+EXPOSE 502
+ENTRYPOINT ["/modbus-sim"]

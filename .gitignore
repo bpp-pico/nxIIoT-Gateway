@@ -1,0 +1,31 @@
+# Go
+gateway/tmp/
+gateway/data/
+gateway/*.db
+gateway/*.db-wal
+gateway/*.db-shm
+gateway/gateway
+gateway/gateway.exe
+gateway/gateway_native*.log
+gateway/gateway_native_pid.xml
+/data/
+
+# Node / Vite
+web/node_modules/
+web/dist/
+web/.vite/
+
+# Env
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Claude Code session state
+.claude/

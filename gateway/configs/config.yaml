@@ -1,0 +1,26 @@
+gateway:
+  id: "GW001"
+  name: "Development Gateway"
+
+api:
+  listen_addr: ":8080"
+
+database:
+  path: "./data/gateway.db"
+
+queue:
+  retention_days: 30
+  sweep_interval_minutes: 60
+
+log:
+  level: "debug"
+  format: "text"
+
+mqtt:
+  broker_url: "tcp://localhost:1883"
+  client_id: "GW001"
+  qos: 1
+
+time:
+  ntp_server: ""
+  timezone: "UTC"

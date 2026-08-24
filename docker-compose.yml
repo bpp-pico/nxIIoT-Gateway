@@ -1,0 +1,48 @@
+services:
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./gateway:/app
+      - gateway-data:/app/data
+    environment:
+      - CGO_ENABLED=0
+      - SEED_DEMO_DEVICE=true
+    depends_on:
+      - modbus-sim
+    # RS-485/USB-serial adapters are not visible inside a container unless
+    # explicitly passed through, so the COM port dropdown (GET
+    # /api/system/serial-ports) is empty by default here. On a Linux host
+    # with a real adapter attached, uncomment and adjust:
+    # devices:
+    #   - "/dev/ttyUSB0:/dev/ttyUSB0"
+
+  # Dev/test-only Modbus TCP simulator standing in for a real field device
+  # (e.g. a power meter) so the acquisition engine can be exercised without
+  # physical RS-485/Modbus hardware. Not part of the production stack.
+  modbus-sim:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile.modbus-sim
+    ports:
+      - "1502:502"
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    environment:
+      - GATEWAY_API_URL=http://gateway:8080
+    depends_on:
+      - gateway
+
+volumes:
+  gateway-data:

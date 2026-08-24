@@ -1,0 +1,13 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+cmd = "go build -o ./tmp/gateway ./cmd/gateway"
+bin = "./tmp/gateway"
+args_bin = ["-config", "configs/config.yaml", "-migrations", "migrations"]
+include_ext = ["go", "yaml", "sql"]
+exclude_dir = ["tmp", "data", "web"]
+delay = 300
+
+[log]
+time = true
