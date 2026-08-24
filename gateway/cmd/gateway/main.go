@@ -18,6 +18,7 @@ import (
 	"nxiiot-gateway/internal/diagnostics"
 	"nxiiot-gateway/internal/forwarder"
 	"nxiiot-gateway/internal/logger"
+	"nxiiot-gateway/internal/netconfig"
 	"nxiiot-gateway/internal/processor"
 	"nxiiot-gateway/internal/queue"
 	"nxiiot-gateway/internal/status"
@@ -140,7 +141,14 @@ func main() {
 	}, log)
 	go fwd.Run(ctx)
 
-	handler := api.NewRouter(cfg, db, log, statusStore, manager, queueRepo, fwd, timeSvc, diagStore, logBuf)
+	// Host network configuration (§16 Config page "Gateway IP"): only
+	// meaningful when this binary runs directly on the host (systemd
+	// deployment, §19), not inside this project's own Docker Compose dev
+	// setup — see internal/netconfig's package doc. netSvc.Current()
+	// degrades to netconfig.ErrUnsupported wherever nmcli isn't present.
+	netSvc := netconfig.NewService(netconfig.New(), log)
+
+	handler := api.NewRouter(cfg, *configPath, db, log, statusStore, manager, queueRepo, fwd, timeSvc, diagStore, logBuf, netSvc)
 	srv := &http.Server{
 		Addr:    cfg.API.ListenAddr,
 		Handler: handler,

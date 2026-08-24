@@ -1472,3 +1472,42 @@ Time:
 ```
 
 The system is intentionally designed so that **field data acquisition, local persistence, time management, and server forwarding are independent components**. This allows the Gateway to continue collecting and storing industrial data even when the Server, network connection, MQTT service, or NTP service becomes temporarily unavailable.
+
+---
+
+# 29. Post-MVP: Web UI Settings & Host Network Configuration
+
+Added after Phase 8 / Definition of Done, on direct request: the Config page's Gateway/Forwarder/MQTT/Time settings (documented in Phase 7 as "edit configs/config.yaml and restart the gateway for those") are now actually editable from the Web UI, and the Config page gained a fourth section for setting the gateway host's own network IP.
+
+## 29.1 Gateway / MQTT / Time Settings
+
+`GET/PUT /api/config/settings` — the Config page's new "Gateway / MQTT / Time Settings" card. Saving:
+
+1. Merges the submitted Gateway ID/Name, MQTT (broker URL, client ID, username, password, QoS, topics, keepalive), and Time (NTP server, timezone, sync interval) fields into the in-memory `config.Config`.
+2. Writes the whole struct back to `config.yaml` via the new `config.Save` (full `yaml.Marshal` re-encode — **not** a comment-preserving patch, a deliberate simplicity tradeoff; any hand-written comments in `config.yaml` are lost the first time a save happens through the UI, which the page's own copy explicitly warns about).
+3. Responds `200`, then calls `os.Exit(0)` after a short delay (letting the HTTP response flush first) — the process restarts under whatever supervises it, and comes back up with the new config loaded.
+
+This was the deliberately chosen "simpler and safer" option over live-reloading the MQTT client/Time Service in place (the alternative considered and rejected: tearing down and rebuilding those subsystems without a process restart, judged more complex and more failure-prone for comparatively little benefit).
+
+Two things make the restart-on-save actually take effect in every deployment mode:
+- **`docker-compose.yml`**: the `gateway` service gained `restart: unless-stopped`, so Docker brings the container back after the process exits. (In the dev compose stack specifically, air's own file watcher — it already watches `configs/` — also notices the same `config.yaml` write and rebuilds/restarts on its own; the two racing is harmless, just an occasional double-restart in dev.)
+- **`gateway/deploy/nxiiot-gateway.service`** (new): a systemd unit for the bare-metal/systemd deployment path (§19, §27), which didn't have a reference unit file in the repo before this. `Restart=always` is load-bearing here for the same reason as the Docker restart policy.
+
+The MQTT password is never sent to the browser (`GET /api/config/settings` omits it, matching §18's export rule) and a blank password field on save leaves the stored password unchanged rather than clearing it.
+
+## 29.2 Host Network IP (`internal/netconfig`)
+
+The higher-risk half of the request: setting the gateway host's actual network interface IP (not a config field, not a container's virtual network — the real LAN-facing adapter), for the case where a Raspberry Pi needs a static IP set up from its own Web UI instead of SSH/console access.
+
+**Scope decision, confirmed with the user before implementing**: this only makes sense when the gateway binary runs directly on the host (the systemd deployment path), never inside this project's own Docker Compose dev setup — a container's network namespace is not the host's real NIC, so there is nothing meaningful to configure from inside `docker compose up`'s `gateway` container. The user explicitly asked to hold off on live-testing or further developing this piece until it's actually run on a Raspberry Pi; in this Windows/Docker dev environment it only exercises (and is only expected to exercise) its graceful "unsupported" path.
+
+Implementation — `internal/netconfig`:
+- Backed by NetworkManager's `nmcli` (the default network stack on Raspberry Pi OS Bookworm+ and most modern Debian/Ubuntu — §27's deployment target), invoked via `os/exec`. There are deliberately no Linux-only build tags here (unlike `internal/time`'s RTC code, which needs actual platform-specific syscalls): `nmcli` invocation is just an external command that fails gracefully ("not found") on any host without it, so the exact same code compiles and its parsing logic is fully unit-testable on any platform, including this Windows dev machine — no cross-compilation needed to verify it.
+- `Controller.Current()/ApplyStatic()/ApplyDHCP()` — every method returns `ErrUnsupported` when `nmcli` isn't on `PATH`, verified live in this dev environment: `GET /api/system/network` on the running (Windows-hosted, Docker) stack returns `{"supported": false}`, confirmed without attempting a single real network command.
+- **`netconfig.Service`** wraps the Controller with a confirm-or-auto-revert safety net — the actual point of this package, not incidental to it: `Apply` snapshots the current config, applies the new static IP immediately, and schedules an automatic revert (`time.AfterFunc`) unless `Confirm` is called within a 45-second window (`networkConfirmWindow`, `internal/api/network.go`). A typo'd IP or gateway that would otherwise lock an operator out of a headless device self-heals instead. Reverting restores the *exact* prior config (static-to-static goes back to the same address, not to DHCP) — `TestServiceRevertsToPreviousStaticConfigNotJustDHCP`.
+- New endpoints: `GET/POST /api/system/network`, `POST /api/system/network/confirm`.
+- Frontend: the Config page's new "Network (Host IP)" card shows "Not available on this host" with an explanation when unsupported (the expected/only state observed so far); when supported, an Apply button and a live countdown-to-revert banner with a Confirm button.
+
+Tests: 10 tests across `netconfig_test.go` (real `nmcli -t` terse-format output parsing, using an injected fake command runner — no `nmcli` binary needed, matching this codebase's established injection pattern for external dependencies) and `service_test.go` (the confirm/revert timer logic against a fake `Controller`, including the "reverts to the prior static config, not DHCP" case). All pass on this Windows dev host, since nothing here requires Linux at compile time.
+
+**Explicitly not yet verified**: any of this against a real `nmcli`/NetworkManager instance or actual network hardware. That verification is deferred to Raspberry Pi deployment, per the user's own instruction — this section will need an update once that happens.

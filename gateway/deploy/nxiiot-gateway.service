@@ -1,0 +1,36 @@
+# systemd unit for the bare-metal/systemd deployment path (§19, §27) —
+# the alternative to Docker Compose. Install to
+# /etc/systemd/system/nxiiot-gateway.service, then:
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nxiiot-gateway
+#
+# Restart=always is load-bearing, not just a nicety: saving Gateway/MQTT/
+# Time settings from the Web UI writes configs/config.yaml and then exits
+# the process (internal/api/settings.go) to apply them — this directive
+# is what actually brings it back up afterward with the new config
+# loaded. Applying a static IP from the Config page's Network section
+# (internal/netconfig) needs the process to keep running through that
+# change, which it does — only Web UI settings saves restart it.
+
+[Unit]
+Description=nxIIoT Gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/opt/nxiiot-gateway/gateway -config /opt/nxiiot-gateway/configs/config.yaml -migrations /opt/nxiiot-gateway/migrations
+WorkingDirectory=/opt/nxiiot-gateway
+Restart=always
+RestartSec=2
+
+# Setting a static IP (internal/netconfig, nmcli) needs privileges this
+# unit does not grant by default — CAP_NET_ADMIN, or root, depending on
+# your NetworkManager polkit policy. Uncomment whichever fits your setup
+# rather than defaulting to root:
+# AmbientCapabilities=CAP_NET_ADMIN
+# User=root
+
+[Install]
+WantedBy=multi-user.target

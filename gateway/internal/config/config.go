@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 
 	"gopkg.in/yaml.v3"
@@ -180,4 +181,26 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+// Save writes cfg back to path as YAML, replacing its previous contents.
+// Used by the Web UI's Settings save (§16/§18): the Gateway/MQTT/Time
+// settings the doc describes as configured via config.yaml can now be
+// edited from the browser instead of by hand.
+//
+// This is a full re-marshal of the struct, not a targeted patch, so any
+// hand-written comments/formatting in the existing file are lost once a
+// save happens through the API. That's a deliberate simplicity tradeoff
+// (a comment-preserving YAML patcher is significantly more code) — the
+// file remains fully valid, readable YAML, just without the original
+// inline comments.
+func Save(path string, cfg *Config) error {
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("marshal config: %w", err)
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		return fmt.Errorf("write config: %w", err)
+	}
+	return nil
 }

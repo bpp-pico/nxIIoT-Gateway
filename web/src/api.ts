@@ -1,4 +1,6 @@
 import type {
+  ApplyNetworkRequest,
+  ApplyNetworkResult,
   ConfigExport,
   ConfigImportResult,
   DashboardSummary,
@@ -6,6 +8,9 @@ import type {
   Device,
   Diagnostics,
   LogEntry,
+  NetworkStatus,
+  SaveSettingsResult,
+  Settings,
   StoreForwardStatus,
   SystemInfo,
   TestConnectionResult,
@@ -61,4 +66,13 @@ export const api = {
   exportConfig: () => request<ConfigExport>('/api/config/export'),
   importConfig: (payload: unknown) =>
     request<ConfigImportResult>('/api/config/import', { method: 'POST', body: JSON.stringify(payload) }),
+
+  getSettings: () => request<Settings>('/api/config/settings'),
+  saveSettings: (s: Settings) =>
+    request<SaveSettingsResult>('/api/config/settings', { method: 'PUT', body: JSON.stringify(s) }),
+
+  getNetworkStatus: () => request<NetworkStatus>('/api/system/network'),
+  applyNetwork: (req: ApplyNetworkRequest) =>
+    request<ApplyNetworkResult>('/api/system/network', { method: 'POST', body: JSON.stringify(req) }),
+  confirmNetwork: () => request<{ confirmed: boolean }>('/api/system/network/confirm', { method: 'POST' }),
 }

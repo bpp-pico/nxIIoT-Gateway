@@ -3,6 +3,13 @@ services:
     build:
       context: ./gateway
       dockerfile: Dockerfile.dev
+    # Settings saved from the Web UI (Gateway/MQTT/Time) write config.yaml
+    # then exit the process to apply them — this restart policy is what
+    # actually brings it back up afterward. air's own dev-mode file
+    # watcher (it watches configs/) also picks up the same write and
+    # rebuilds/restarts on its own; the two racing is harmless, just a
+    # brief double-restart in dev.
+    restart: unless-stopped
     ports:
       - "8080:8080"
     volumes:

@@ -1,9 +1,405 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { styles } from '../styles'
-import type { ConfigImportResult } from '../types'
+import type { ConfigImportResult, NetworkStatus, Settings } from '../types'
 
 export function ConfigPage() {
+  return (
+    <div>
+      <h2 style={{ marginTop: 0 }}>Config</h2>
+      <SettingsSection />
+      <NetworkSection />
+      <BackupRestoreSection />
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------
+// Gateway / MQTT / Time settings — saved into configs/config.yaml, then
+// the gateway process restarts to apply them (the "simpler and safer"
+// option: no live-reload of the MQTT client or Time Service in place).
+// ---------------------------------------------------------------------
+function SettingsSection() {
+  const [settings, setSettings] = useState<Settings | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+
+  useEffect(() => {
+    api.getSettings().then(setSettings).catch((err) => setError(String(err instanceof Error ? err.message : err)))
+  }, [])
+
+  // Once the save triggers a restart, poll /api/system until it answers
+  // again (a fresh process, higher-or-reset uptime) so the page doesn't
+  // just say "restarting" forever.
+  useEffect(() => {
+    if (!restarting) return
+    const interval = setInterval(() => {
+      api
+        .getSystem()
+        .then(() => {
+          setRestarting(false)
+          setSaving(false)
+        })
+        .catch(() => {
+          // still restarting — expected, keep polling
+        })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [restarting])
+
+  const handleSave = async () => {
+    if (!settings) return
+    if (!confirm('Save settings and restart the gateway now? The gateway will be briefly unreachable.')) return
+
+    setSaving(true)
+    setError(null)
+    try {
+      await api.saveSettings(settings)
+      setRestarting(true)
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err))
+      setSaving(false)
+    }
+  }
+
+  if (error && !settings) {
+    return (
+      <>
+        <div style={styles.sectionTitle}>Gateway / MQTT / Time Settings</div>
+        <div style={styles.errorBox}>{error}</div>
+      </>
+    )
+  }
+  if (!settings) {
+    return (
+      <>
+        <div style={styles.sectionTitle}>Gateway / MQTT / Time Settings</div>
+        <p style={styles.muted}>Loading…</p>
+      </>
+    )
+  }
+
+  return (
+    <>
+      <div style={styles.sectionTitle}>Gateway / MQTT / Time Settings</div>
+      <p style={styles.muted}>
+        Saving restarts the gateway process to apply changes (a few seconds of downtime). This rewrites
+        configs/config.yaml — any hand-added comments in that file are lost once saved from here.
+      </p>
+      {error && <div style={styles.errorBox}>{error}</div>}
+      {restarting && <div style={{ ...styles.errorBox, background: '#fff8e1', color: '#8a6d00' }}>Restarting gateway…</div>}
+
+      <div style={styles.cardGrid}>
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Gateway</div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Gateway ID</label>
+            <input
+              style={styles.input}
+              value={settings.gateway.id}
+              onChange={(e) => setSettings({ ...settings, gateway: { ...settings.gateway, id: e.target.value } })}
+            />
+          </div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Name</label>
+            <input
+              style={styles.input}
+              value={settings.gateway.name}
+              onChange={(e) => setSettings({ ...settings, gateway: { ...settings.gateway, name: e.target.value } })}
+            />
+          </div>
+        </div>
+
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>MQTT Server</div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Broker URL</label>
+            <input
+              style={styles.input}
+              placeholder="tcp://broker.internal:1883"
+              value={settings.mqtt.broker_url}
+              onChange={(e) => setSettings({ ...settings, mqtt: { ...settings.mqtt, broker_url: e.target.value } })}
+            />
+          </div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Client ID</label>
+            <input
+              style={styles.input}
+              value={settings.mqtt.client_id}
+              onChange={(e) => setSettings({ ...settings, mqtt: { ...settings.mqtt, client_id: e.target.value } })}
+            />
+          </div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Username</label>
+            <input
+              style={styles.input}
+              value={settings.mqtt.username ?? ''}
+              onChange={(e) => setSettings({ ...settings, mqtt: { ...settings.mqtt, username: e.target.value } })}
+            />
+          </div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Password (leave blank to keep unchanged)</label>
+            <input
+              type="password"
+              style={styles.input}
+              value={settings.mqtt.password ?? ''}
+              onChange={(e) => setSettings({ ...settings, mqtt: { ...settings.mqtt, password: e.target.value } })}
+            />
+          </div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>QoS</label>
+            <input
+              type="number"
+              min={0}
+              max={2}
+              style={styles.input}
+              value={settings.mqtt.qos}
+              onChange={(e) => setSettings({ ...settings, mqtt: { ...settings.mqtt, qos: Number(e.target.value) } })}
+            />
+          </div>
+        </div>
+
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Time / NTP</div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>NTP Server</label>
+            <input
+              style={styles.input}
+              placeholder="ntp.internal (empty disables NTP sync)"
+              value={settings.time.ntp_server}
+              onChange={(e) => setSettings({ ...settings, time: { ...settings.time, ntp_server: e.target.value } })}
+            />
+          </div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Timezone</label>
+            <input
+              style={styles.input}
+              value={settings.time.timezone}
+              onChange={(e) => setSettings({ ...settings, time: { ...settings.time, timezone: e.target.value } })}
+            />
+          </div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Sync Interval (seconds)</label>
+            <input
+              type="number"
+              min={1}
+              style={styles.input}
+              value={settings.time.sync_interval_seconds}
+              onChange={(e) =>
+                setSettings({ ...settings, time: { ...settings.time, sync_interval_seconds: Number(e.target.value) } })
+              }
+            />
+          </div>
+        </div>
+      </div>
+
+      <button style={{ ...styles.primaryButton, marginTop: '1rem' }} disabled={saving} onClick={handleSave}>
+        {saving ? 'Saving…' : 'Save & Restart Gateway'}
+      </button>
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------
+// Host network IP — only meaningful when the gateway binary runs
+// directly on a Linux host with NetworkManager (the systemd deployment
+// path), never inside this project's own Docker Compose dev containers.
+// A confirm-or-auto-revert safety net (backend: internal/netconfig)
+// protects against a typo'd IP/gateway locking the device out.
+// ---------------------------------------------------------------------
+function NetworkSection() {
+  const [status, setStatus] = useState<NetworkStatus | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [applying, setApplying] = useState(false)
+  const [confirmDeadline, setConfirmDeadline] = useState<number | null>(null)
+  const [now, setNow] = useState(Date.now())
+  const [form, setForm] = useState({ interface: '', address: '', prefix: 24, gateway: '', dns: '' })
+
+  const load = () => {
+    api
+      .getNetworkStatus()
+      .then((s) => {
+        setStatus(s)
+        setError(null)
+        if (s.pending_confirmation === false) setConfirmDeadline(null)
+        if (!form.interface && s.interface) {
+          setForm({
+            interface: s.interface,
+            address: s.address ?? '',
+            prefix: s.prefix ?? 24,
+            gateway: s.gateway ?? '',
+            dns: (s.dns ?? []).join(', '),
+          })
+        }
+      })
+      .catch((err) => setError(String(err instanceof Error ? err.message : err)))
+  }
+
+  useEffect(() => {
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (confirmDeadline === null) return
+    const interval = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [confirmDeadline])
+
+  const secondsLeft = confirmDeadline !== null ? Math.max(0, Math.round((confirmDeadline - now) / 1000)) : 0
+
+  useEffect(() => {
+    if (confirmDeadline !== null && secondsLeft === 0) {
+      // The revert window has elapsed server-side; refresh to show the
+      // (now reverted) actual state.
+      setConfirmDeadline(null)
+      load()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secondsLeft])
+
+  const handleApply = async () => {
+    if (!confirm(`Apply static IP ${form.address}/${form.prefix}? If this address becomes unreachable it will auto-revert.`))
+      return
+    setApplying(true)
+    setError(null)
+    try {
+      const dns = form.dns
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const result = await api.applyNetwork({
+        interface: form.interface,
+        address: form.address,
+        prefix: form.prefix,
+        gateway: form.gateway,
+        dns,
+      })
+      setConfirmDeadline(Date.now() + result.confirm_within_seconds * 1000)
+      setNow(Date.now())
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const handleConfirm = async () => {
+    try {
+      await api.confirmNetwork()
+      setConfirmDeadline(null)
+      load()
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err))
+    }
+  }
+
+  return (
+    <>
+      <div style={styles.sectionTitle}>Network (Host IP)</div>
+
+      {!status ? (
+        !error && <p style={styles.muted}>Loading…</p>
+      ) : !status.supported ? (
+        <p style={styles.muted}>
+          Not available on this host — setting the host's real network IP requires Linux with NetworkManager
+          (<code>nmcli</code>) and only makes sense when the gateway runs directly on the host, not inside this
+          project's Docker Compose dev containers (a container's network is not the host's real network adapter).
+        </p>
+      ) : (
+        <>
+          <p style={styles.muted}>
+            Applying takes effect immediately. If not confirmed within the countdown, it automatically reverts to
+            the previous configuration — reconnect at the new address and confirm from there before it expires.
+          </p>
+          {error && <div style={styles.errorBox}>{error}</div>}
+
+          {confirmDeadline !== null && (
+            <div style={{ ...styles.errorBox, background: '#fff8e1', color: '#8a6d00', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>New IP applied — confirm within {secondsLeft}s or it will revert automatically.</span>
+              <button style={styles.primaryButton} onClick={handleConfirm}>
+                Confirm New IP
+              </button>
+            </div>
+          )}
+
+          <div style={styles.cardGrid}>
+            <div style={styles.card}>
+              <div style={styles.cardTitle}>Current</div>
+              <table style={styles.table}>
+                <tbody>
+                  <tr>
+                    <td style={styles.td}>Interface</td>
+                    <td style={styles.td}>{status.interface}</td>
+                  </tr>
+                  <tr>
+                    <td style={styles.td}>Method</td>
+                    <td style={styles.td}>{status.method}</td>
+                  </tr>
+                  <tr>
+                    <td style={styles.td}>Address</td>
+                    <td style={styles.td}>
+                      {status.address}
+                      {status.prefix ? `/${status.prefix}` : ''}
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={styles.td}>Gateway</td>
+                    <td style={styles.td}>{status.gateway}</td>
+                  </tr>
+                  <tr>
+                    <td style={styles.td}>DNS</td>
+                    <td style={styles.td}>{(status.dns ?? []).join(', ')}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+
+            <div style={styles.card}>
+              <div style={styles.cardTitle}>Set Static IP</div>
+              <div style={styles.formRow}>
+                <label style={styles.label}>Interface</label>
+                <input style={styles.input} value={form.interface} onChange={(e) => setForm({ ...form, interface: e.target.value })} />
+              </div>
+              <div style={styles.formRow}>
+                <label style={styles.label}>IP Address</label>
+                <input style={styles.input} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+              </div>
+              <div style={styles.formRow}>
+                <label style={styles.label}>Prefix (CIDR)</label>
+                <input
+                  type="number"
+                  min={1}
+                  max={32}
+                  style={styles.input}
+                  value={form.prefix}
+                  onChange={(e) => setForm({ ...form, prefix: Number(e.target.value) })}
+                />
+              </div>
+              <div style={styles.formRow}>
+                <label style={styles.label}>Gateway</label>
+                <input style={styles.input} value={form.gateway} onChange={(e) => setForm({ ...form, gateway: e.target.value })} />
+              </div>
+              <div style={styles.formRow}>
+                <label style={styles.label}>DNS (comma-separated)</label>
+                <input style={styles.input} value={form.dns} onChange={(e) => setForm({ ...form, dns: e.target.value })} />
+              </div>
+              <button style={styles.primaryButton} disabled={applying || confirmDeadline !== null} onClick={handleApply}>
+                {applying ? 'Applying…' : 'Apply'}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  )
+}
+
+// ---------------------------------------------------------------------
+// Config backup/restore — unchanged from Phase 7.
+// ---------------------------------------------------------------------
+function BackupRestoreSection() {
   const [error, setError] = useState<string | null>(null)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<ConfigImportResult | null>(null)
@@ -44,11 +440,9 @@ export function ConfigPage() {
   }
 
   return (
-    <div>
-      <h2 style={{ marginTop: 0 }}>Configuration Backup &amp; Restore</h2>
-      {error && <div style={styles.errorBox}>{error}</div>}
-
+    <>
       <div style={styles.sectionTitle}>Backup</div>
+      {error && <div style={styles.errorBox}>{error}</div>}
       <p style={styles.muted}>
         Downloads devices, data points, and non-secret gateway settings as JSON. Passwords are never included.
       </p>
@@ -59,8 +453,8 @@ export function ConfigPage() {
       <div style={styles.sectionTitle}>Restore</div>
       <p style={styles.muted}>
         Restores devices and data points from a previously exported file (matched by id — an id that doesn't exist on
-        this gateway is created fresh). Gateway/Forwarder/MQTT/Time settings are not restored automatically: edit
-        configs/config.yaml and restart the gateway for those.
+        this gateway is created fresh). Gateway/MQTT/Time settings are not part of this file — use the Settings
+        section above for those.
       </p>
       <input
         ref={fileInputRef}
@@ -111,6 +505,6 @@ export function ConfigPage() {
           </tbody>
         </table>
       )}
-    </div>
+    </>
   )
 }

@@ -1,12 +1,15 @@
-# Handoff — nxIIoT Gateway (Phases 0-4 complete)
+# Handoff — nxIIoT Gateway (MVP complete, Phases 0-8 + post-MVP Settings/Network IP)
 
-Status as of this handoff. For the full design spec and per-phase task checklists (with implementation notes inline), see [industrial_iot_gateway_handoff_dev_plan.md](industrial_iot_gateway_handoff_dev_plan.md). For day-to-day dev commands, see [README.md](README.md). This document is the orientation layer: what's true right now, what to watch out for, and where to pick up.
+Status as of this handoff. For the full design spec and per-phase task checklists (with implementation notes inline), see [industrial_iot_gateway_handoff_dev_plan.md](industrial_iot_gateway_handoff_dev_plan.md) — §24 for the Definition of Done, §29 for the post-MVP addition described below. For day-to-day dev commands, see [README.md](README.md). This document is the orientation layer: what's true right now, what to watch out for, and where to pick up.
 
 ## Git state
 
-- **Committed** (`01a0614`): Phases 0-3 — project setup, Modbus engine, device management, persistent storage.
-- **Uncommitted**: Phase 4 — Store & Forward (queue state machine, forwarder, storage policy, `cmd/server-sim`). Run `git status` and commit when ready; nothing destructive is pending.
-- Git committer identity was auto-detected from the OS account (`Banpot BPP <banpot@pico.co.th>`), never explicitly configured. Set it if that's wrong.
+- **Committed and pushed** to `origin/master` (https://github.com/bpp-pico/nxIIoT-Gateway.git):
+  - `01a0614` — Phases 0-3: project setup, Modbus engine, device management, persistent storage.
+  - `d0b4656` — Phase 4: Store & Forward.
+  - `f11c8b2` — Phases 5-8: MQTT, Time Service, Web UI, Reliability.
+- **Uncommitted**: the post-MVP Web UI Settings + host network IP feature (§29) — `internal/netconfig` (new), `internal/api/settings.go` + `network.go` (new), `gateway/deploy/nxiiot-gateway.service` (new), plus edits to `router.go`, `main.go`, `config.go`, `docker-compose.yml`, `ConfigPage.tsx`, `api.ts`, `types.ts`, and both `README.md`/this file. Run `git status` and commit when ready; nothing destructive is pending.
+- Git committer identity was auto-detected from the OS account the first time, then explicitly set to `bpp-pico <banpot@pico.co.th>` for the push — matches what's in the repo now.
 
 ## What's implemented
 
@@ -17,28 +20,39 @@ Status as of this handoff. For the full design spec and per-phase task checklist
 | 2 | Device/Data Point CRUD API + Web UI, live config reload (no restart), Test Connection/Read, COM port dropdown | `internal/api`, `internal/acquisition/manager.go`, `web/src/pages`, `internal/system/serial.go` |
 | 3 | Every Reading persisted to `data_queue` (not just logged), per-gateway sequence ID, quality/priority, retention sweep | `internal/queue` (queue.go, retention.go), `internal/processor` |
 | 4 | Queue state machine (PENDING→SENDING→SENT/retry), exponential backoff, batching, crash recovery, storage threshold/full policy | `internal/queue` (dispatch.go, backoff.go, storagepolicy.go), `internal/forwarder` |
+| 5 | `MQTTAdapter` (QoS 1, application-level ack over a dedicated ack topic, TLS/auth, auto-reconnect) as a second `forwarder.Adapter`, selected via `forwarder.transport` | `internal/forwarder` (mqttadapter.go, wire.go), `cmd/server-sim` (MQTT consumer) |
+| 6 | Time Service: hand-rolled SNTP client, Linux hardware RTC (`/dev/rtc0` ioctls) with cross-platform fallback, SYNCED/RTC/UNSYNCED/INVALID quality | `internal/time` (package `timeservice`) |
+| 7 | Web UI: Dashboard (CPU/RAM/storage/network/queue/time widgets), Store & Forward/Time/Diagnostics/Logs/Config pages; backend diagnostics counters, in-memory log ring buffer, config export/import | `internal/diagnostics`, `internal/logger/ringbuffer.go`, `internal/api` (configio.go, dashboard.go, diagnostics.go, logs.go), `web/src/pages` |
+| 8 | Storage WARNING/CRITICAL/FULL levels (§17); chaos-tested SIGKILL power failure and full network partition, which surfaced and fixed a DNS-classification bug | `internal/queue/storagepolicy.go`, `internal/modbus/quality.go` |
+| post-MVP | Web UI Settings (Gateway/MQTT/Time → `config.yaml` + auto-restart), host network IP config (`nmcli`-backed, confirm-or-auto-revert safety net) | `internal/netconfig`, `internal/api` (settings.go, network.go) |
 
-Two dev-only simulators exist purely to make the above testable without physical hardware or a real server — never deployed to production:
+Three dev-only simulators exist purely to make the above testable without physical hardware or a real server — never deployed to production:
 - `cmd/modbus-sim` — fake Modbus TCP slave (Phase 1)
-- `cmd/server-sim` — fake "Internal Server" that dedupes on `gateway_id`+`sequence_id` (Phase 4)
+- `cmd/server-sim` — fake "Internal Server" that dedupes on `gateway_id`+`sequence_id`, speaking both HTTP and MQTT (Phase 4/5)
+- `mosquitto` (docker-compose service, not Go code) — dev-only MQTT broker, anonymous/unencrypted (Phase 5)
 
 ## Architecture decisions worth knowing before touching this code
 
-- **Acquisition never depends on the server.** `acquisition.Manager` and `forwarder.Forwarder` are independent goroutines that only share the database. A dead MQTT broker/server should never slow or block Modbus polling — this is Rule 1 in the design doc and is load-bearing for several other decisions below.
-- **`acquisition.Manager` diffs and hot-reloads.** Every device/data point CRUD call triggers `Manager.Reload(ctx)`, which diffs the desired device set against what's currently running and starts/stops/restarts only what changed. This is why the Web UI doesn't need a gateway restart.
-- **Sequence IDs are assigned atomically with the insert.** `queue.Repository.Insert` does `UPDATE gateway SET last_sequence = last_sequence + 1 ... RETURNING last_sequence` inside the same transaction as the `data_queue` INSERT. Confirmed via `go.bug.st`-style empirical testing that SQLite's `RETURNING` works fine with `modernc.org/sqlite`.
-- **The forwarder's transport is behind an `Adapter` interface** (`internal/forwarder/adapter.go`) specifically so Phase 5's MQTT adapter can be added without touching the state machine. `HTTPAdapter` is the dev/test stand-in, not a production HTTPS adapter (that's V2 roadmap, out of scope).
-- **`internal/queue` owns all `data_queue` SQL.** `internal/processor` and `internal/forwarder` call into it rather than querying the table directly — keeps the schema/SQL in one place.
-- **Backoff and retention/eviction sweepers are all `func(ctx) { ...; select { case <-ctx.Done(): return; case <-ticker.C: } }` loops** started as bare goroutines in `main.go`, tied to the same top-level `context.Context` that's cancelled on SIGINT/SIGTERM.
+- **Acquisition never depends on the server.** `acquisition.Manager` and `forwarder.Forwarder` are independent goroutines that only share the database. A dead MQTT broker/server should never slow or block Modbus polling — this is Rule 1 in the design doc and is load-bearing for several other decisions below. Verified under a full `docker network disconnect` (Phase 8), not just a stopped downstream container.
+- **`acquisition.Manager` diffs and hot-reloads.** Every device/data point CRUD call triggers `Manager.Reload(ctx)`, which diffs the desired device set against what's currently running and starts/stops/restarts only what changed. This is why the Web UI doesn't need a gateway restart — **except** the new Settings save (§29), which restarts the whole process deliberately, because it's changing MQTT/Time subsystem config, not device polling config.
+- **Sequence IDs are assigned atomically with the insert.** `queue.Repository.Insert` does `UPDATE gateway SET last_sequence = last_sequence + 1 ... RETURNING last_sequence` inside the same transaction as the `data_queue` INSERT. Survived a real `SIGKILL` mid-write with no gaps or resets (Phase 8).
+- **The forwarder's transport is behind an `Adapter` interface** (`internal/forwarder/adapter.go`). `HTTPAdapter` is the dev/test transport; `MQTTAdapter` (Phase 5) is the production one. Swapping is a one-line change in `cmd/gateway/adapter.go` driven by `forwarder.transport` in config.
+- **`internal/queue` owns all `data_queue` SQL.** `internal/processor` and `internal/forwarder` call into it rather than querying the table directly.
+- **Every long-running loop is a bare goroutine over the same top-level `context.Context`**, cancelled on SIGINT/SIGTERM: retention sweeper, storage pressure sweeper, `forwarder.Run`, `timeservice.Run`. `main.go` is the single place that wires all of them.
+- **Platform-specific code is isolated behind a package-level interface, not build tags, when the underlying call is just `os/exec` or similarly portable** (`internal/netconfig`'s `nmcli` invocation) — build tags (`internal/time/rtc_linux.go` vs `rtc_other.go`) are reserved for genuinely platform-specific syscalls (`golang.org/x/sys/unix` ioctls) that literally won't compile elsewhere. This distinction mattered in practice: `netconfig` needed no build tags at all, so its real parsing logic is unit-tested directly on this Windows dev host; the RTC ioctl code needed them, so it's only verified via `GOOS=linux` cross-compilation, never actually run here.
+- **Config the Web UI can write back (§29) is a full `yaml.Marshal` re-encode, not a comment-preserving patch.** Deliberate simplicity tradeoff — `config.Save` loses any hand-written comments in `config.yaml` the first time it's used. Documented in-app (the Settings card's own copy) and in the design doc.
+- **A settings change that needs a process restart calls `os.Exit(0)` and relies on the process supervisor to restart it** (`docker-compose.yml`'s `restart: unless-stopped`, or `gateway/deploy/nxiiot-gateway.service`'s `Restart=always`) — rather than the app trying to re-exec or restart its own subsystems in place. Keeps the restart path identical to a crash-restart, which is already tested.
 
 ## Bugs found via live testing (not caught by unit tests alone)
 
-Both of these are worth remembering as a general lesson for this codebase: **unit tests here run against fresh, empty temp databases, and against Linux inside Docker. Real bugs showed up only when testing against a database with real accumulated state, and/or on native Windows.**
+Recurring lesson for this codebase: **unit tests run against fresh temp state and (mostly) on this Windows host; real bugs have consistently shown up only under live `docker compose` testing with real accumulated state, real network conditions, or a genuinely killed process.**
 
-1. **`modbus.QualityFromError`** originally matched `"connection refused"` (Linux wording) but not Windows's `"actively refused it"` wording for the identical condition, so a real dropped TCP connection misclassified as `INVALID` instead of `DEVICE_OFFLINE` — only visible testing the native Windows build against a real refused connection. Fixed with explicit per-platform substring matching (a `syscall.ECONNREFUSED` errno check was tried first and does **not** actually match on Windows — confirmed empirically, not assumed). Regression test dials a real closed OS socket rather than mocking an error string.
-2. **Migration `0003_data_queue_retry.sql`** originally used `DEFAULT (strftime(...))` for a new column. SQLite's `ALTER TABLE ADD COLUMN` rejects a non-constant default on a table that already has rows (would need to backfill each one) — but a table with zero rows doesn't trigger the restriction, which is exactly the situation every test's fresh temp DB is in. Only surfaced against the native gateway's real database carrying rows from earlier phases. Fixed with a constant epoch default (functionally equivalent: "in the past" just means "immediately eligible").
+1. **`modbus.QualityFromError`** (Phase 3) originally matched `"connection refused"` (Linux wording) but not Windows's `"actively refused it"` for the identical condition — only visible testing the native Windows build against a real refused connection. Fixed with explicit per-platform substring matching; regression test dials a real closed OS socket.
+2. **Migration `0003_data_queue_retry.sql`** (Phase 3) used a non-constant `DEFAULT (strftime(...))` on `ALTER TABLE ADD COLUMN`, which SQLite only rejects on a table that already has rows — every test's fresh temp DB has zero rows, so this only surfaced against the native gateway's real, populated database. Fixed with a constant epoch default.
+3. **`modbus.QualityFromError`** again (Phase 8): a real `docker network disconnect` chaos test made Docker's embedded DNS resolver fail with `"server misbehaving"`, which matched none of the existing substring checks and fell through to `INVALID` instead of `DEVICE_OFFLINE`. Fixed with an explicit `errors.As(err, &dnsErr)` check for `*net.DNSError` (catches every DNS failure mode, not just this string) — the fix was found *because* the chaos test used a real total network partition, not a single stopped service.
+4. **Docker-on-Windows file-watcher misses** (Phases 7 and 9/post-MVP, recurring): the `web` and `gateway` dev containers' hot-reload (Vite / air) has repeatedly failed to notice source changes written from outside the container (this environment's Windows host editing files bind-mounted into Linux containers). Not a code bug, but real enough to have caused actual confusion mid-session (a user-reported "HTTP 502" that was actually a stale DNS registration from an earlier manual `docker network disconnect`/`connect`, not a code issue). `docker compose restart <service>` is the reliable fix; `docker compose up -d --force-recreate <service>` if a restart alone doesn't clear it.
 
-**Takeaway for future work on this repo**: after unit tests pass, do at least one live run against the native Windows build with an already-populated database before considering a change done, especially anything touching migrations or OS-level error handling.
+**Takeaway for future work on this repo**: after unit tests pass, do a live `docker compose` run — and for anything touching failure/recovery paths specifically, an actual chaos test (`docker network disconnect`, `docker compose kill -s SIGKILL`, stopping a real dependency) — before considering a change done. This has found real, distinct bugs four times now, not hypothetically.
 
 ## How to run
 
@@ -46,19 +60,27 @@ Both of these are worth remembering as a general lesson for this codebase: **uni
 ```bash
 docker compose up --build
 ```
-Frontend: http://localhost:5173 · API: http://localhost:8080 · modbus-sim: host port 1502 · server-sim: host port 9000.
+Frontend: http://localhost:5173 · API: http://localhost:8080 · modbus-sim: host port 1502 · server-sim: host port 9000 · mosquitto: host port 1883.
 
 **Native Windows (only needed for RTU/COM-port testing — see README's "Testing RTU against real hardware" section):**
-Go is installed portably at `C:\Users\banpot\go-sdk` (no admin rights used; a normal `winget`/MSI install would need them). Set `GOROOT`/`PATH` to that before `go build`/`go run`. Stop the Dockerized `gateway`/`web` containers first to free ports 8080/5173.
+```powershell
+$env:Path += ";C:\Program Files\Go\bin"   # go.exe is installed but not on PATH by default in this environment
+go build -o gateway.exe ./cmd/gateway
+```
+Stop the Dockerized `gateway`/`web` containers first to free ports 8080/5173.
 
 ## Known gaps / untested paths (be honest about these, don't assume they work)
 
-- **RTU**: only the serial *connect* was verified against a real USB-to-RS485 (CH340) adapter. No responding RTU slave device was available, so a full read round-trip (function code → response → decode) has never been exercised against real hardware.
-- **Frontend**: type-checks (`tsc -b`), builds (`vite build`), and every module transforms cleanly through the Vite dev server — but nobody has clicked through the UI in an actual browser in this environment. Treat "the API contract is correct" as verified; treat "the UX actually works as designed" as unverified.
+- **RTU**: only the serial *connect* was verified against a real USB-to-RS485 (CH340) adapter (Phase 1). No responding RTU slave device has ever been available, so a full read round-trip (function code → response → decode) — and the real-hardware CRC-error path — remain unverified against physical hardware. The CRC *classification logic itself* is tested for real (`TestQualityFromErrorCRCMismatch`, against goburrow/modbus's actual frame decoder), just not over an actual wire.
+- **RTC hardware**: `internal/time/rtc_linux.go`'s `/dev/rtc0` ioctls cross-compile clean (`GOOS=linux GOARCH=amd64 go build`) but have never run against a physical RTC chip — no such hardware in this dev environment. The NTP-fails/RTC-available fallback transition is proven only via a fake RTC in unit tests.
+- **Host network IP (`internal/netconfig`)**: same situation as RTC — real, unit-tested parsing/apply logic against realistic `nmcli` output, zero runs against an actual `nmcli`/NetworkManager instance. **Explicitly deferred to Raspberry Pi deployment per direct instruction** — do not attempt to exercise this live on a non-RPi host; on Windows/Docker it's only expected to (and does) report `{"supported": false}`.
 - **`word_order`** is a stored-but-unused datapoint field — `byte_order` alone (e.g. `"ABCD"`/`"BADC"`) already fully specifies both byte and word order for 32/64-bit types. Documented in `internal/modbus/decode.go`.
-- **API stubs still returning `501`**: `GET /api/logs`, `GET /api/config/export`, `POST /api/config/import` — not yet scoped to any phase's task list explicitly beyond Phase 7 (Web UI: "Logs", "Configuration backup", "Configuration restore").
-- **MQTT**: not implemented. `MQTTConfig` exists in `internal/config` but nothing reads it yet.
+- **Config save (§29) is a full-file re-marshal.** Editing `config.yaml` by hand and then saving once from the Web UI will silently discard those hand-written comments/formatting. Not a bug, but a footgun worth remembering.
 
-## Next: Phase 5 — MQTT
+## Next
 
-Per the plan doc: MQTT client with connect/reconnect/auth/TLS/QoS 1/batch publishing/application-level ACK, replacing (or running alongside) `HTTPAdapter` as a second `forwarder.Adapter` implementation. The state machine, batching, retry/backoff, and `Adapter` interface are already built and tested — Phase 5 should be mostly a new `internal/mqtt` package plus an `MQTTAdapter` implementing the existing `forwarder.Adapter` interface, without needing to touch `internal/forwarder/forwarder.go` itself.
+MVP (Phases 0-8) and the post-MVP Settings/Network IP addition are both done, per the honest caveats above. There is no pending "Phase 9" in the design doc — remaining work is either:
+- **V2/V3 roadmap** items from §25 of the design doc (HTTPS adapter, user management, alarm management, fleet management, OTA updates, ...), or
+- **Closing the two RPi-only gaps** above once real hardware is available: an actual RTU read round-trip against a responding slave, a real RTC chip, and a real `nmcli`/NetworkManager static-IP change — none of which can be meaningfully tested on this Windows/Docker dev machine.
+
+Whoever picks this up next should decide which of those is the priority rather than assume — nothing in the current codebase blocks either path.

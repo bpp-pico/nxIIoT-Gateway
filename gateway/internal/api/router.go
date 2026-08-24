@@ -17,6 +17,7 @@ import (
 	"nxiiot-gateway/internal/diagnostics"
 	"nxiiot-gateway/internal/forwarder"
 	"nxiiot-gateway/internal/logger"
+	"nxiiot-gateway/internal/netconfig"
 	"nxiiot-gateway/internal/queue"
 	"nxiiot-gateway/internal/status"
 	"nxiiot-gateway/internal/system"
@@ -25,6 +26,7 @@ import (
 
 type Server struct {
 	cfg           *config.Config
+	configPath    string
 	db            *sql.DB
 	log           *slog.Logger
 	deviceRepo    *device.Repository
@@ -36,11 +38,13 @@ type Server struct {
 	timeSvc       *timeservice.Service
 	diag          *diagnostics.Store
 	logBuf        *logger.RingBuffer
+	netSvc        *netconfig.Service
 }
 
-func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *status.Store, manager *acquisition.Manager, queueRepo *queue.Repository, fwd *forwarder.Forwarder, timeSvc *timeservice.Service, diag *diagnostics.Store, logBuf *logger.RingBuffer) http.Handler {
+func NewRouter(cfg *config.Config, configPath string, db *sql.DB, log *slog.Logger, statusStore *status.Store, manager *acquisition.Manager, queueRepo *queue.Repository, fwd *forwarder.Forwarder, timeSvc *timeservice.Service, diag *diagnostics.Store, logBuf *logger.RingBuffer, netSvc *netconfig.Service) http.Handler {
 	s := &Server{
 		cfg:           cfg,
+		configPath:    configPath,
 		db:            db,
 		log:           log,
 		deviceRepo:    device.NewRepository(db),
@@ -52,6 +56,7 @@ func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *st
 		timeSvc:       timeSvc,
 		diag:          diag,
 		logBuf:        logBuf,
+		netSvc:        netSvc,
 	}
 
 	r := chi.NewRouter()
@@ -86,6 +91,12 @@ func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *st
 
 		r.Get("/config/export", s.exportConfig)
 		r.Post("/config/import", s.importConfig)
+		r.Get("/config/settings", s.getSettings)
+		r.Put("/config/settings", s.saveSettings)
+
+		r.Get("/system/network", s.getNetworkStatus)
+		r.Post("/system/network", s.applyNetwork)
+		r.Post("/system/network/confirm", s.confirmNetwork)
 	})
 
 	return r

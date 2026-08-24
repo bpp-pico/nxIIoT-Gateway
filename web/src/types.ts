@@ -132,3 +132,51 @@ export interface ConfigImportResult {
   data_points_updated: number
   errors?: string[]
 }
+
+export interface Settings {
+  gateway: { id: string; name: string }
+  mqtt: {
+    broker_url: string
+    client_id: string
+    username?: string
+    password?: string
+    qos: number
+    data_topic?: string
+    ack_topic?: string
+    keepalive_seconds: number
+  }
+  time: {
+    ntp_server: string
+    timezone: string
+    sync_interval_seconds: number
+  }
+}
+
+export interface SaveSettingsResult {
+  saved: boolean
+  restarting: boolean
+}
+
+export interface NetworkStatus {
+  supported: boolean
+  pending_confirmation?: boolean
+  interface?: string
+  method?: string
+  address?: string
+  prefix?: number
+  gateway?: string
+  dns?: string[]
+}
+
+export interface ApplyNetworkRequest {
+  interface: string
+  address: string
+  prefix: number
+  gateway: string
+  dns?: string[]
+}
+
+export interface ApplyNetworkResult {
+  applied: boolean
+  confirm_within_seconds: number
+}
