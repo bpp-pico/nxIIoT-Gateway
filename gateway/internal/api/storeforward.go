@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"time"
 
+	"nxiiot-gateway/internal/queue"
 	"nxiiot-gateway/internal/storage"
 )
 
@@ -15,6 +16,7 @@ type storeForwardStatusDTO struct {
 	NewestPending      *time.Time `json:"newest_pending,omitempty"`
 	RetryCount         int64      `json:"retry_count"`
 	StorageUsedPercent *float64   `json:"storage_used_percent,omitempty"`
+	StorageLevel       string     `json:"storage_level,omitempty"`
 	ServerConnected    bool       `json:"server_connected"`
 	ServerLastError    string     `json:"server_last_error,omitempty"`
 	ServerLastSentAt   *time.Time `json:"server_last_sent_at,omitempty"`
@@ -37,6 +39,7 @@ func (s *Server) getStoreForwardStatus(w http.ResponseWriter, r *http.Request) {
 
 	if pct, err := storage.DiskUsagePercent(s.cfg.Database.Path); err == nil {
 		dto.StorageUsedPercent = &pct
+		dto.StorageLevel = string(queue.ClassifyStorageLevel(pct, s.cfg.Queue.StorageFullPercent))
 	} else {
 		s.log.Warn("failed to read disk usage for store-forward status", "error", err)
 	}

@@ -1,4 +1,17 @@
-import type { DataPoint, Device, TestConnectionResult, TestReadResult } from './types'
+import type {
+  ConfigExport,
+  ConfigImportResult,
+  DashboardSummary,
+  DataPoint,
+  Device,
+  Diagnostics,
+  LogEntry,
+  StoreForwardStatus,
+  SystemInfo,
+  TestConnectionResult,
+  TestReadResult,
+  TimeStatus,
+} from './types'
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
@@ -37,4 +50,15 @@ export const api = {
     request<DataPoint>(`/api/datapoints/${id}`, { method: 'PUT', body: JSON.stringify(dp) }),
   deleteDataPoint: (id: number) => request<void>(`/api/datapoints/${id}`, { method: 'DELETE' }),
   testDataPoint: (id: number) => request<TestReadResult>(`/api/datapoints/${id}/test`, { method: 'POST' }),
+
+  getSystem: () => request<SystemInfo>('/api/system'),
+  getDashboardSummary: () => request<DashboardSummary>('/api/dashboard/summary'),
+  getStoreForwardStatus: () => request<StoreForwardStatus>('/api/store-forward/status'),
+  getTime: () => request<TimeStatus>('/api/time'),
+  getDiagnostics: () => request<Diagnostics>('/api/diagnostics'),
+  getLogs: (limit = 300) => request<LogEntry[]>(`/api/logs?limit=${limit}`),
+
+  exportConfig: () => request<ConfigExport>('/api/config/export'),
+  importConfig: (payload: unknown) =>
+    request<ConfigImportResult>('/api/config/import', { method: 'POST', body: JSON.stringify(payload) }),
 }

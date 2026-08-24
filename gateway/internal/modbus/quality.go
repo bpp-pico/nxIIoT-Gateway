@@ -43,6 +43,18 @@ func QualityFromError(err error) Quality {
 		return DeviceOffline
 	}
 
+	// A DNS failure (e.g. the resolver itself unreachable — "server
+	// misbehaving" — or the name genuinely not found) means the device
+	// can't be reached at all, same as a refused/unreachable connection.
+	// Found via chaos testing (Phase 8, §23 "Network Disconnected"): with
+	// the container's network fully severed, Docker's embedded DNS at
+	// 127.0.0.11 fails with "server misbehaving", which the substring
+	// checks below don't match and previously fell through to INVALID.
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return DeviceOffline
+	}
+
 	msg := strings.ToLower(err.Error())
 	switch {
 	case strings.Contains(msg, "crc"):

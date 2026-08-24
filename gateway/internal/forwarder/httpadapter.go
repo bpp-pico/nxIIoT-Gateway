@@ -11,10 +11,10 @@ import (
 	"nxiiot-gateway/internal/queue"
 )
 
-// HTTPAdapter is a minimal Adapter implementation used until the MQTT
-// adapter (Phase 5) exists. §15 requires the transport to sit behind this
-// interface specifically so it can be swapped later without touching the
-// state machine — this is that seam exercised for real, not just designed.
+// HTTPAdapter is a minimal Adapter implementation used for local dev/test
+// (cmd/server-sim) and as the fallback transport. §15 requires the
+// transport to sit behind this interface specifically so it can be swapped
+// for MQTTAdapter without touching the state machine.
 type HTTPAdapter struct {
 	url    string
 	client *http.Client
@@ -24,33 +24,8 @@ func NewHTTPAdapter(url string, timeout time.Duration) *HTTPAdapter {
 	return &HTTPAdapter{url: url, client: &http.Client{Timeout: timeout}}
 }
 
-// WireEntry is the JSON representation of a queue.DispatchEntry sent to
-// the server. gateway_id + sequence_id is the idempotency key (Rule 6/10).
-type WireEntry struct {
-	GatewayID      string   `json:"gateway_id"`
-	SequenceID     int64    `json:"sequence_id"`
-	DeviceID       int64    `json:"device_id"`
-	DatapointID    int64    `json:"datapoint_id"`
-	Value          *float64 `json:"value"`
-	Quality        string   `json:"quality"`
-	EventTimestamp string   `json:"event_timestamp"`
-	Priority       string   `json:"priority"`
-}
-
 func (a *HTTPAdapter) Send(ctx context.Context, batch []queue.DispatchEntry) error {
-	wire := make([]WireEntry, len(batch))
-	for i, e := range batch {
-		wire[i] = WireEntry{
-			GatewayID:      e.GatewayID,
-			SequenceID:     e.SequenceID,
-			DeviceID:       e.DeviceID,
-			DatapointID:    e.DatapointID,
-			Value:          e.Value,
-			Quality:        e.Quality,
-			EventTimestamp: e.EventTimestamp.UTC().Format(time.RFC3339Nano),
-			Priority:       e.Priority,
-		}
-	}
+	wire := toWireEntries(batch)
 
 	body, err := json.Marshal(wire)
 	if err != nil {

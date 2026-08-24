@@ -51,3 +51,84 @@ export interface TestReadResult {
   quality: string
   error?: string
 }
+
+export interface SystemInfo {
+  status: string
+  uptime_seconds: number
+  go_version: string
+  goroutines: number
+  num_cpu: number
+  cpu_percent?: number
+  mem_used_percent?: number
+  mem_total_mb?: number
+  mem_used_mb?: number
+  disk_used_percent?: number
+  disk_total_gb?: number
+  disk_used_gb?: number
+  net_bytes_sent?: number
+  net_bytes_recv?: number
+}
+
+export interface DashboardSummary {
+  device_count: number
+  enabled_device_count: number
+  data_point_count: number
+}
+
+export interface StoreForwardStatus {
+  pending_records: number
+  sending_records: number
+  oldest_pending?: string
+  newest_pending?: string
+  retry_count: number
+  storage_used_percent?: number
+  storage_level?: 'NORMAL' | 'WARNING' | 'CRITICAL' | 'FULL'
+  server_connected: boolean
+  server_last_error?: string
+  server_last_sent_at?: string
+}
+
+export interface TimeStatus {
+  system_time: string
+  timezone: string
+  ntp_server?: string
+  ntp_status: boolean
+  last_sync?: string
+  clock_offset_ms?: number
+  rtc_status: boolean
+  rtc_time?: string
+  time_quality: 'SYNCED' | 'RTC' | 'UNSYNCED' | 'INVALID'
+}
+
+export interface Diagnostics {
+  modbus_tx: number
+  modbus_rx: number
+  avg_response_time_ms: number
+  timeout_count: number
+  crc_error_count: number
+  retry_count: number
+}
+
+export interface LogEntry {
+  time: string
+  level: string
+  message: string
+  attrs?: Record<string, unknown>
+}
+
+export interface ConfigExport {
+  exported_at: string
+  gateway: { id: string; name: string }
+  forwarder: Record<string, unknown>
+  mqtt: Record<string, unknown>
+  time: Record<string, unknown>
+  devices: Array<Device & { data_points: DataPoint[] }>
+}
+
+export interface ConfigImportResult {
+  devices_created: number
+  devices_updated: number
+  data_points_created: number
+  data_points_updated: number
+  errors?: string[]
+}

@@ -9,6 +9,15 @@ import (
 // New builds a structured logger. format is "text" or "json"; level is one
 // of debug, info, warn, error.
 func New(level, format string) *slog.Logger {
+	log, _ := NewWithRingBuffer(level, format, 0)
+	return log
+}
+
+// NewWithRingBuffer is New, plus an in-memory ring buffer of the last
+// capacity records for GET /api/logs (§16 "Logs") — logging to
+// stdout/docker logs is unaffected, the buffer is purely additive.
+// capacity <= 0 disables the buffer (Entries always empty).
+func NewWithRingBuffer(level, format string, capacity int) (*slog.Logger, *RingBuffer) {
 	var lvl slog.Level
 	switch strings.ToLower(level) {
 	case "debug":
@@ -30,5 +39,9 @@ func New(level, format string) *slog.Logger {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 
-	return slog.New(handler)
+	if capacity <= 0 {
+		capacity = 1
+	}
+	rb := NewRingBufferHandler(handler, capacity)
+	return slog.New(rb), rb
 }

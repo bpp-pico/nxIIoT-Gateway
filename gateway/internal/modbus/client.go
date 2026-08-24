@@ -33,9 +33,12 @@ type Client interface {
 
 // ReadWithRetry retries a Read up to maxRetries times (in addition to the
 // first attempt) on failure, per FR-001/FR-002 retry configuration.
-func ReadWithRetry(ctx context.Context, c Client, fc FunctionCode, address, quantity uint16, maxRetries int) ([]byte, error) {
+// attempts is how many requests were actually sent on the wire (always
+// >= 1), for diagnostics counters (§16) — it is meaningful even on error.
+func ReadWithRetry(ctx context.Context, c Client, fc FunctionCode, address, quantity uint16, maxRetries int) (raw []byte, attempts int, err error) {
 	var lastErr error
 	for attempt := 0; attempt <= maxRetries; attempt++ {
+		attempts = attempt + 1
 		if attempt > 0 {
 			// Reconnect before retrying: a failed read often means the
 			// connection itself is dead (closed socket, serial port error).
@@ -48,15 +51,15 @@ func ReadWithRetry(ctx context.Context, c Client, fc FunctionCode, address, quan
 
 		raw, err := c.Read(ctx, fc, address, quantity)
 		if err == nil {
-			return raw, nil
+			return raw, attempts, nil
 		}
 		lastErr = err
 
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, attempts, ctx.Err()
 		default:
 		}
 	}
-	return nil, lastErr
+	return nil, attempts, lastErr
 }

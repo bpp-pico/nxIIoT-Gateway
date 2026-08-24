@@ -40,11 +40,11 @@ type QueueConfig struct {
 	EvictBatchSize       int     `yaml:"evict_batch_size"`
 }
 
-// ForwarderConfig controls Store & Forward (§9). ServerURL targets the
-// dev/test HTTP adapter (cmd/server-sim) — Phase 5 adds a real MQTT
-// adapter (see MQTTConfig) as an alternative transport behind the same
-// forwarder.Adapter interface.
+// ForwarderConfig controls Store & Forward (§9). Transport selects which
+// Adapter main.go wires up: "http" targets the dev/test adapter
+// (cmd/server-sim, ServerURL); "mqtt" targets MQTTAdapter (see MQTTConfig).
 type ForwarderConfig struct {
+	Transport      string `yaml:"transport"`
 	ServerURL      string `yaml:"server_url"`
 	BatchSize      int    `yaml:"batch_size"`
 	PollIntervalMs int    `yaml:"poll_interval_ms"`
@@ -56,15 +56,45 @@ type LogConfig struct {
 	Format string `yaml:"format"`
 }
 
+// MQTTConfig configures MQTTAdapter (Phase 5, §15). DataTopic/AckTopic
+// default to "gateway/<client_id>/data" and "/ack" when left blank — see
+// Load. TLS is only applied when TLS.Enabled is true.
 type MQTTConfig struct {
-	BrokerURL string `yaml:"broker_url"`
-	ClientID  string `yaml:"client_id"`
-	QoS       int    `yaml:"qos"`
+	BrokerURL        string        `yaml:"broker_url"`
+	ClientID         string        `yaml:"client_id"`
+	Username         string        `yaml:"username"`
+	Password         string        `yaml:"password"`
+	QoS              int           `yaml:"qos"`
+	DataTopic        string        `yaml:"data_topic"`
+	AckTopic         string        `yaml:"ack_topic"`
+	KeepAliveSec     int           `yaml:"keepalive_seconds"`
+	ConnectTimeoutMs int           `yaml:"connect_timeout_ms"`
+	PublishTimeoutMs int           `yaml:"publish_timeout_ms"`
+	AckTimeoutMs     int           `yaml:"ack_timeout_ms"`
+	TLS              MQTTTLSConfig `yaml:"tls"`
 }
 
+// MQTTTLSConfig is deliberately file-path based rather than embedding raw
+// PEM in YAML, so the exported config JSON (§18) never has to worry about
+// leaking key material — only paths, which are meaningless off the host.
+type MQTTTLSConfig struct {
+	Enabled            bool   `yaml:"enabled"`
+	CAFile             string `yaml:"ca_file"`
+	CertFile           string `yaml:"cert_file"`
+	KeyFile            string `yaml:"key_file"`
+	InsecureSkipVerify bool   `yaml:"insecure_skip_verify"`
+}
+
+// TimeConfig configures the Time Service (Phase 6, §11-§14). NTPServer
+// empty disables NTP sync (the service still reports RTC/UNSYNCED per
+// §11's fallback priority). RTCDevice is only used on Linux — see
+// internal/time/rtc_linux.go.
 type TimeConfig struct {
-	NTPServer string `yaml:"ntp_server"`
-	Timezone  string `yaml:"timezone"`
+	NTPServer       string `yaml:"ntp_server"`
+	Timezone        string `yaml:"timezone"`
+	SyncIntervalSec int    `yaml:"sync_interval_seconds"`
+	QueryTimeoutMs  int    `yaml:"query_timeout_ms"`
+	RTCDevice       string `yaml:"rtc_device"`
 }
 
 // Load reads configuration from path, then applies GATEWAY_CONFIG env var
@@ -106,6 +136,47 @@ func Load(path string) (*Config, error) {
 	}
 	if cfg.Forwarder.SendTimeoutMs <= 0 {
 		cfg.Forwarder.SendTimeoutMs = 5000
+	}
+	if cfg.Forwarder.Transport == "" {
+		cfg.Forwarder.Transport = "http"
+	}
+
+	if cfg.MQTT.QoS <= 0 {
+		cfg.MQTT.QoS = 1
+	}
+	if cfg.MQTT.ClientID == "" {
+		cfg.MQTT.ClientID = cfg.Gateway.ID
+	}
+	if cfg.MQTT.DataTopic == "" {
+		cfg.MQTT.DataTopic = "gateway/" + cfg.MQTT.ClientID + "/data"
+	}
+	if cfg.MQTT.AckTopic == "" {
+		cfg.MQTT.AckTopic = "gateway/" + cfg.MQTT.ClientID + "/ack"
+	}
+	if cfg.MQTT.KeepAliveSec <= 0 {
+		cfg.MQTT.KeepAliveSec = 30
+	}
+	if cfg.MQTT.ConnectTimeoutMs <= 0 {
+		cfg.MQTT.ConnectTimeoutMs = 5000
+	}
+	if cfg.MQTT.PublishTimeoutMs <= 0 {
+		cfg.MQTT.PublishTimeoutMs = 5000
+	}
+	if cfg.MQTT.AckTimeoutMs <= 0 {
+		cfg.MQTT.AckTimeoutMs = 10000
+	}
+
+	if cfg.Time.SyncIntervalSec <= 0 {
+		cfg.Time.SyncIntervalSec = 300
+	}
+	if cfg.Time.QueryTimeoutMs <= 0 {
+		cfg.Time.QueryTimeoutMs = 3000
+	}
+	if cfg.Time.RTCDevice == "" {
+		cfg.Time.RTCDevice = "/dev/rtc0"
+	}
+	if cfg.Time.Timezone == "" {
+		cfg.Time.Timezone = "UTC"
 	}
 
 	return &cfg, nil

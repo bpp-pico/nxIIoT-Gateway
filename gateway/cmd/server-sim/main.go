@@ -5,6 +5,12 @@
 // It demonstrates the server-side half of Rule 7/10 (at-least-once
 // delivery + idempotent processing): it deduplicates on gateway_id +
 // sequence_id, so a batch retried after a lost ACK does not double-count.
+//
+// It speaks both transports behind forwarder.Adapter (§15): HTTP (/ingest,
+// for HTTPAdapter) and, when -mqtt-broker is set, MQTT (for MQTTAdapter) —
+// subscribing to the data topic and publishing an application-level ack
+// back per batch, exactly what a real Internal Server's MQTT consumer
+// would do. Both share the same in-memory dedup store.
 package main
 
 import (
@@ -12,7 +18,11 @@ import (
 	"flag"
 	"log"
 	"net/http"
+	"os"
+	"strings"
 	"sync"
+
+	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
 type entry struct {
@@ -68,9 +78,19 @@ func (s *store) all() []entry {
 
 func main() {
 	addr := flag.String("addr", ":9000", "listen address")
+	mqttBroker := flag.String("mqtt-broker", "", "MQTT broker URL (e.g. tcp://mosquitto:1883); empty disables the MQTT consumer")
+	mqttDataTopic := flag.String("mqtt-data-topic", "gateway/+/data", "MQTT topic filter to subscribe to for incoming batches")
 	flag.Parse()
 
+	if v := os.Getenv("MQTT_BROKER_URL"); v != "" {
+		*mqttBroker = v
+	}
+
 	st := newStore()
+
+	if *mqttBroker != "" {
+		startMQTTConsumer(*mqttBroker, *mqttDataTopic, st)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ingest", func(w http.ResponseWriter, r *http.Request) {
@@ -98,5 +118,64 @@ func main() {
 	log.Printf("server-sim listening on %s", *addr)
 	if err := http.ListenAndServe(*addr, mux); err != nil {
 		log.Fatal(err)
+	}
+}
+
+// mqttBatchIn mirrors forwarder.mqttBatch — the payload MQTTAdapter
+// publishes to the data topic.
+type mqttBatchIn struct {
+	BatchID string  `json:"batch_id"`
+	Entries []entry `json:"entries"`
+}
+
+// mqttAckOut mirrors the ack MQTTAdapter waits for on the ack topic.
+type mqttAckOut struct {
+	BatchID string `json:"batch_id"`
+	Error   string `json:"error,omitempty"`
+}
+
+// startMQTTConsumer subscribes to dataTopicFilter (e.g. "gateway/+/data")
+// and, for every batch received, dedupes it into st and publishes an
+// application-level ack (§15) back to the sender's ack topic — derived by
+// swapping the topic's "/data" suffix for "/ack", matching the default
+// topic scheme MQTTAdapter derives in config.Load.
+func startMQTTConsumer(broker, dataTopicFilter string, st *store) {
+	opts := mqtt.NewClientOptions().
+		AddBroker(broker).
+		SetClientID("server-sim").
+		SetAutoReconnect(true).
+		SetConnectRetry(true)
+
+	opts.SetOnConnectHandler(func(c mqtt.Client) {
+		log.Printf("mqtt: connected to %s, subscribing to %s", broker, dataTopicFilter)
+		token := c.Subscribe(dataTopicFilter, 1, func(client mqtt.Client, msg mqtt.Message) {
+			var batch mqttBatchIn
+			if err := json.Unmarshal(msg.Payload(), &batch); err != nil {
+				log.Printf("mqtt: invalid batch payload on %s: %v", msg.Topic(), err)
+				return
+			}
+
+			accepted, duplicates := st.ingest(batch.Entries)
+			log.Printf("mqtt ingest: topic=%s batch_id=%s received=%d accepted=%d duplicates=%d",
+				msg.Topic(), batch.BatchID, len(batch.Entries), accepted, duplicates)
+
+			ackTopic := strings.TrimSuffix(msg.Topic(), "/data") + "/ack"
+			ack, _ := json.Marshal(mqttAckOut{BatchID: batch.BatchID})
+			client.Publish(ackTopic, 1, false, ack)
+		})
+		token.Wait()
+		if token.Error() != nil {
+			log.Printf("mqtt: subscribe failed: %v", token.Error())
+		}
+	})
+	opts.SetConnectionLostHandler(func(_ mqtt.Client, err error) {
+		log.Printf("mqtt: connection lost, will auto-reconnect: %v", err)
+	})
+
+	client := mqtt.NewClient(opts)
+	token := client.Connect()
+	token.Wait()
+	if token.Error() != nil {
+		log.Fatalf("mqtt: initial connect to %s failed: %v", broker, token.Error())
 	}
 }

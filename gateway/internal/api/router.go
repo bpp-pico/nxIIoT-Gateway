@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -13,10 +14,13 @@ import (
 	"nxiiot-gateway/internal/config"
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
+	"nxiiot-gateway/internal/diagnostics"
 	"nxiiot-gateway/internal/forwarder"
+	"nxiiot-gateway/internal/logger"
 	"nxiiot-gateway/internal/queue"
 	"nxiiot-gateway/internal/status"
 	"nxiiot-gateway/internal/system"
+	timeservice "nxiiot-gateway/internal/time"
 )
 
 type Server struct {
@@ -29,9 +33,12 @@ type Server struct {
 	manager       *acquisition.Manager
 	queueRepo     *queue.Repository
 	forwarder     *forwarder.Forwarder
+	timeSvc       *timeservice.Service
+	diag          *diagnostics.Store
+	logBuf        *logger.RingBuffer
 }
 
-func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *status.Store, manager *acquisition.Manager, queueRepo *queue.Repository, fwd *forwarder.Forwarder) http.Handler {
+func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *status.Store, manager *acquisition.Manager, queueRepo *queue.Repository, fwd *forwarder.Forwarder, timeSvc *timeservice.Service, diag *diagnostics.Store, logBuf *logger.RingBuffer) http.Handler {
 	s := &Server{
 		cfg:           cfg,
 		db:            db,
@@ -42,6 +49,9 @@ func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *st
 		manager:       manager,
 		queueRepo:     queueRepo,
 		forwarder:     fwd,
+		timeSvc:       timeSvc,
+		diag:          diag,
+		logBuf:        logBuf,
 	}
 
 	r := chi.NewRouter()
@@ -69,17 +79,20 @@ func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *st
 		r.Get("/store-forward/status", s.getStoreForwardStatus)
 		r.Get("/store-forward/statistics", s.getStoreForwardStatistics)
 
-		r.Get("/logs", s.notImplemented)
+		r.Get("/diagnostics", s.getDiagnostics)
+		r.Get("/dashboard/summary", s.getDashboardSummary)
 
-		r.Get("/config/export", s.notImplemented)
-		r.Post("/config/import", s.notImplemented)
+		r.Get("/logs", s.getLogs)
+
+		r.Get("/config/export", s.exportConfig)
+		r.Post("/config/import", s.importConfig)
 	})
 
 	return r
 }
 
 func (s *Server) getSystem(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, system.Current())
+	writeJSON(w, http.StatusOK, system.Current(s.cfg.Database.Path))
 }
 
 // getSerialPorts lists serial ports available on the gateway host, for the
@@ -94,17 +107,45 @@ func (s *Server) getSerialPorts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string][]string{"ports": ports})
 }
 
-func (s *Server) getTime(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"time_quality": "UNSYNCED",
-		"timezone":     s.cfg.Time.Timezone,
-	})
+// timeDTO matches §16's Time panel fields.
+type timeDTO struct {
+	SystemTime    time.Time  `json:"system_time"`
+	Timezone      string     `json:"timezone"`
+	NTPServer     string     `json:"ntp_server,omitempty"`
+	NTPStatus     bool       `json:"ntp_status"`
+	LastSync      *time.Time `json:"last_sync,omitempty"`
+	ClockOffsetMs *float64   `json:"clock_offset_ms,omitempty"`
+	RTCStatus     bool       `json:"rtc_status"`
+	RTCTime       *time.Time `json:"rtc_time,omitempty"`
+	TimeQuality   string     `json:"time_quality"`
 }
 
-func (s *Server) notImplemented(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusNotImplemented, map[string]string{
-		"error": "not implemented yet",
-	})
+func (s *Server) getTime(w http.ResponseWriter, r *http.Request) {
+	if s.timeSvc == nil {
+		writeJSON(w, http.StatusOK, timeDTO{
+			SystemTime:  time.Now().UTC(),
+			Timezone:    s.cfg.Time.Timezone,
+			TimeQuality: string(timeservice.QualityUnsynced),
+		})
+		return
+	}
+
+	st := s.timeSvc.Status()
+	dto := timeDTO{
+		SystemTime:  st.SystemTime,
+		Timezone:    st.Timezone,
+		NTPServer:   st.NTPServer,
+		NTPStatus:   st.NTPSynced,
+		LastSync:    st.LastSync,
+		RTCStatus:   st.RTCAvailable,
+		RTCTime:     st.RTCTime,
+		TimeQuality: string(st.TimeQuality),
+	}
+	if st.ClockOffset != nil {
+		ms := float64(*st.ClockOffset) / float64(time.Millisecond)
+		dto.ClockOffsetMs = &ms
+	}
+	writeJSON(w, http.StatusOK, dto)
 }
 
 // reload asks the acquisition Manager to pick up config changes. Errors are

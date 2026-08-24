@@ -75,6 +75,54 @@ func TestEvictOldestNonCriticalPrefersLowestPriorityThenOldest(t *testing.T) {
 	}
 }
 
+func TestClassifyStorageLevel(t *testing.T) {
+	const fullPercent = 95.0
+	cases := []struct {
+		pct  float64
+		want queue.StorageLevel
+	}{
+		{50, queue.StorageNormal},
+		{69.9, queue.StorageNormal},
+		{70, queue.StorageWarning},
+		{85, queue.StorageWarning},
+		{90, queue.StorageCritical},
+		{94.9, queue.StorageCritical},
+		{95, queue.StorageFull},
+		{99, queue.StorageFull},
+	}
+	for _, c := range cases {
+		if got := queue.ClassifyStorageLevel(c.pct, fullPercent); got != c.want {
+			t.Errorf("ClassifyStorageLevel(%v, %v) = %v, want %v", c.pct, fullPercent, got, c.want)
+		}
+	}
+}
+
+func TestRunStoragePressureSweeperDoesNotEvictAtWarningOrCritical(t *testing.T) {
+	ctx := context.Background()
+	_, repo := openTestDB(t)
+	if err := repo.EnsureGateway(ctx, "GW001", "Test Gateway"); err != nil {
+		t.Fatalf("EnsureGateway: %v", err)
+	}
+	insertReading(t, ctx, repo, "LOW")
+
+	log := slog.New(slog.NewTextHandler(testWriter{t}, nil))
+
+	for _, pct := range []float64{75, 92} { // WARNING, then CRITICAL — neither reaches fullPercent=95
+		usage := func() (float64, error) { return pct, nil }
+		runCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
+		queue.RunStoragePressureSweeper(runCtx, repo, usage, 95, 10, 20*time.Millisecond, log)
+		cancel()
+	}
+
+	stats, err := repo.Stats(ctx)
+	if err != nil {
+		t.Fatalf("Stats: %v", err)
+	}
+	if stats.PendingCount != 1 {
+		t.Fatalf("PendingCount = %d, want 1 (WARNING/CRITICAL must not evict, only FULL does)", stats.PendingCount)
+	}
+}
+
 func TestRunStoragePressureSweeperOnlyEvictsWhenOverThreshold(t *testing.T) {
 	ctx := context.Background()
 	_, repo := openTestDB(t)

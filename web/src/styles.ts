@@ -30,6 +30,20 @@ export const styles = {
   badgeBad: { padding: '0.1rem 0.5rem', borderRadius: 12, background: '#fdecea', color: '#c0392b', fontSize: '0.75rem' } satisfies CSSProperties,
   badgeNeutral: { padding: '0.1rem 0.5rem', borderRadius: 12, background: '#eee', color: '#555', fontSize: '0.75rem' } satisfies CSSProperties,
   muted: { color: '#888', fontSize: '0.85rem' } satisfies CSSProperties,
+  cardGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem', marginTop: '1rem' } satisfies CSSProperties,
+  card: { border: '1px solid #eee', borderRadius: 8, padding: '1rem' } satisfies CSSProperties,
+  cardTitle: { fontSize: '0.8rem', color: '#888', marginBottom: '0.4rem' } satisfies CSSProperties,
+  cardValue: { fontSize: '1.4rem', fontWeight: 700 } satisfies CSSProperties,
+  cardSub: { fontSize: '0.8rem', color: '#888', marginTop: '0.2rem' } satisfies CSSProperties,
+  sectionTitle: { fontSize: '0.85rem', color: '#555', fontWeight: 700, marginTop: '1.5rem', marginBottom: '0.25rem' } satisfies CSSProperties,
+  progressTrack: { background: '#eee', borderRadius: 4, height: 8, overflow: 'hidden' } satisfies CSSProperties,
+  progressFill: (pct: number, danger: boolean): CSSProperties => ({
+    width: `${Math.max(0, Math.min(100, pct))}%`,
+    height: '100%',
+    background: danger ? '#c0392b' : '#111',
+  }),
+  logLine: { fontFamily: 'ui-monospace, monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap', padding: '0.15rem 0', borderBottom: '1px solid #f2f2f2' } satisfies CSSProperties,
+  logPanel: { maxHeight: '70vh', overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, padding: '0.5rem 0.75rem', marginTop: '0.5rem', background: '#fafafa' } satisfies CSSProperties,
 }
 
 export function qualityBadgeStyle(quality?: string): CSSProperties {

@@ -137,6 +137,15 @@ func (r *Repository) query(ctx context.Context, query string, args ...any) ([]De
 	return devices, rows.Err()
 }
 
+// Count returns the total number of devices, and how many are enabled —
+// for the Dashboard "Device Count" widget (§16).
+func (r *Repository) Count(ctx context.Context) (total, enabled int64, err error) {
+	err = r.db.QueryRowContext(ctx,
+		`SELECT COUNT(*), COUNT(*) FILTER (WHERE enabled = 1) FROM device`,
+	).Scan(&total, &enabled)
+	return total, enabled, err
+}
+
 // Get returns a single device by id, or ErrNotFound.
 func (r *Repository) Get(ctx context.Context, id int64) (Device, error) {
 	row := r.db.QueryRowContext(ctx, `SELECT `+selectColumns+` FROM device WHERE id = ?`, id)

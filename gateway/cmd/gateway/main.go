@@ -15,12 +15,14 @@ import (
 	"nxiiot-gateway/internal/config"
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
+	"nxiiot-gateway/internal/diagnostics"
 	"nxiiot-gateway/internal/forwarder"
 	"nxiiot-gateway/internal/logger"
 	"nxiiot-gateway/internal/processor"
 	"nxiiot-gateway/internal/queue"
 	"nxiiot-gateway/internal/status"
 	"nxiiot-gateway/internal/storage"
+	timeservice "nxiiot-gateway/internal/time"
 )
 
 func main() {
@@ -33,7 +35,7 @@ func main() {
 		panic(err)
 	}
 
-	log := logger.New(cfg.Log.Level, cfg.Log.Format)
+	log, logBuf := logger.NewWithRingBuffer(cfg.Log.Level, cfg.Log.Format, 1000)
 	log.Info("starting nxIIoT Gateway", "gateway_id", cfg.Gateway.ID)
 
 	db, err := storage.Open(cfg.Database.Path, *migrationsDir, log)
@@ -52,6 +54,15 @@ func main() {
 	// config file default is the native/localhost case.
 	if url := os.Getenv("FORWARDER_SERVER_URL"); url != "" {
 		cfg.Forwarder.ServerURL = url
+	}
+	if transport := os.Getenv("FORWARDER_TRANSPORT"); transport != "" {
+		cfg.Forwarder.Transport = transport
+	}
+	if url := os.Getenv("MQTT_BROKER_URL"); url != "" {
+		cfg.MQTT.BrokerURL = url
+	}
+	if ntpServer := os.Getenv("NTP_SERVER"); ntpServer != "" {
+		cfg.Time.NTPServer = ntpServer
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -81,12 +92,24 @@ func main() {
 		time.Duration(cfg.Queue.StorageSweepInterval)*time.Second,
 		log)
 
+	// Time Service (Rule 8/9/10): an unreachable NTP server only degrades
+	// TimeQuality, it never blocks acquisition — this goroutine shares
+	// nothing with the Modbus poller but the process.
+	timeSvc := timeservice.New(timeservice.Config{
+		NTPServer:    cfg.Time.NTPServer,
+		SyncInterval: time.Duration(cfg.Time.SyncIntervalSec) * time.Second,
+		QueryTimeout: time.Duration(cfg.Time.QueryTimeoutMs) * time.Millisecond,
+		RTCDevice:    cfg.Time.RTCDevice,
+	}, cfg.Time.Timezone, log)
+	go timeSvc.Run(ctx)
+
 	// Acquisition must never depend on the API server or any downstream
 	// server connectivity (Rule 1). The Manager owns one poller goroutine
 	// per enabled device and is reloaded by the API layer whenever a
 	// device/data point is created, edited, deleted, or toggled, so the
 	// Web UI takes effect without a gateway restart.
 	statusStore := status.NewStore()
+	diagStore := diagnostics.NewStore()
 	deviceRepo := device.NewRepository(db)
 	datapointRepo := datapoint.NewRepository(db)
 	manager := acquisition.NewManager(ctx, log, deviceRepo, datapointRepo, func(r acquisition.Reading) {
@@ -97,21 +120,27 @@ func main() {
 		} else {
 			log.Warn("reading", "device", r.DeviceName, "tag", r.Tag, "quality", r.Quality)
 		}
-	})
+	}, diagStore)
 	if err := manager.Reload(ctx); err != nil {
 		log.Error("failed to start acquisition", "error", err)
 	}
 
 	// Store & Forward runs independently of acquisition (Rule 1): a down
 	// server only grows the PENDING backlog, it never blocks Modbus polling.
-	adapter := forwarder.NewHTTPAdapter(cfg.Forwarder.ServerURL, time.Duration(cfg.Forwarder.SendTimeoutMs)*time.Millisecond)
+	adapter, closeAdapter, err := buildAdapter(ctx, cfg, log)
+	if err != nil {
+		log.Error("failed to initialize forwarder adapter", "error", err)
+		os.Exit(1)
+	}
+	defer closeAdapter()
+
 	fwd := forwarder.New(queueRepo, adapter, forwarder.Config{
 		BatchSize:    cfg.Forwarder.BatchSize,
 		PollInterval: time.Duration(cfg.Forwarder.PollIntervalMs) * time.Millisecond,
 	}, log)
 	go fwd.Run(ctx)
 
-	handler := api.NewRouter(cfg, db, log, statusStore, manager, queueRepo, fwd)
+	handler := api.NewRouter(cfg, db, log, statusStore, manager, queueRepo, fwd, timeSvc, diagStore, logBuf)
 	srv := &http.Server{
 		Addr:    cfg.API.ListenAddr,
 		Handler: handler,

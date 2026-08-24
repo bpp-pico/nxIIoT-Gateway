@@ -13,6 +13,7 @@ import (
 
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
+	"nxiiot-gateway/internal/diagnostics"
 	"nxiiot-gateway/internal/modbus"
 )
 
@@ -23,10 +24,13 @@ type OnReading func(Reading)
 type Poller struct {
 	log       *slog.Logger
 	onReading OnReading
+	diag      *diagnostics.Store
 }
 
-func NewPoller(log *slog.Logger, onReading OnReading) *Poller {
-	return &Poller{log: log, onReading: onReading}
+// diag may be nil (e.g. in tests that don't care about diagnostics
+// counters) — every diag.RecordResult call below is guarded accordingly.
+func NewPoller(log *slog.Logger, onReading OnReading, diag *diagnostics.Store) *Poller {
+	return &Poller{log: log, onReading: onReading, diag: diag}
 }
 
 // Run polls every device concurrently until ctx is cancelled, blocking
@@ -109,14 +113,22 @@ func (p *Poller) readOne(ctx context.Context, client modbus.Client, d device.Dev
 	}
 
 	readCtx, cancel := context.WithTimeout(ctx, time.Duration(d.TimeoutMs)*time.Millisecond)
-	raw, err := modbus.ReadWithRetry(readCtx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, d.Retry)
+	start := time.Now()
+	raw, attempts, err := modbus.ReadWithRetry(readCtx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, d.Retry)
+	elapsed := time.Since(start)
 	cancel()
 
 	if err != nil {
 		q := modbus.QualityFromError(err)
 		p.log.Warn("modbus read failed", "device", d.Name, "tag", dp.TagName, "quality", q, "error", err)
+		if p.diag != nil {
+			p.diag.RecordResult(q, elapsed, attempts)
+		}
 		p.onReading(p.badReading(d, dp, eventTime, q))
 		return
+	}
+	if p.diag != nil {
+		p.diag.RecordResult(modbus.Good, elapsed, attempts)
 	}
 
 	decoded, err := modbus.Decode(raw, dt, dp.ByteOrder)

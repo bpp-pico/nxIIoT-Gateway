@@ -13,8 +13,9 @@ import (
 
 // Adapter delivers a batch to the server and reports success or failure
 // for the whole batch. §15: the architecture must isolate the transport
-// (MQTT today, HTTPS later) behind this interface so it can be swapped
-// without touching the state machine.
+// (MQTTAdapter in production, HTTPAdapter for local dev/test, HTTPS
+// possible later) behind this interface so it can be swapped without
+// touching the state machine.
 type Adapter interface {
 	Send(ctx context.Context, batch []queue.DispatchEntry) error
 }

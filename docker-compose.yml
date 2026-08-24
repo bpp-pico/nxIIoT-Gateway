@@ -11,9 +11,17 @@ services:
     environment:
       - CGO_ENABLED=0
       - SEED_DEMO_DEVICE=true
+      # Default dev transport is MQTT (the production path, Phase 5) via
+      # the mosquitto service below. FORWARDER_SERVER_URL stays set so
+      # switching back to the HTTP dev adapter only needs
+      # FORWARDER_TRANSPORT=http overridden (e.g. `docker compose run -e
+      # FORWARDER_TRANSPORT=http gateway`), not an edit to this file.
+      - FORWARDER_TRANSPORT=mqtt
       - FORWARDER_SERVER_URL=http://server-sim:9000/ingest
+      - MQTT_BROKER_URL=tcp://mosquitto:1883
     depends_on:
       - modbus-sim
+      - mosquitto
       - server-sim
     # RS-485/USB-serial adapters are not visible inside a container unless
     # explicitly passed through, so the COM port dropdown (GET
@@ -32,15 +40,31 @@ services:
     ports:
       - "1502:502"
 
-  # Dev/test-only fake "Internal Server" standing in for the real MQTT
-  # broker/server (Phase 5) so Store & Forward can be exercised end-to-end.
-  # Not part of the production stack.
+  # Dev/test-only fake "Internal Server" so Store & Forward can be
+  # exercised end-to-end without a real backend. Speaks both HTTP
+  # (HTTPAdapter, port 9000) and MQTT (MQTTAdapter, via mosquitto) — see
+  # cmd/server-sim. Not part of the production stack.
   server-sim:
     build:
       context: ./gateway
       dockerfile: Dockerfile.server-sim
     ports:
       - "9000:9000"
+    environment:
+      - MQTT_BROKER_URL=tcp://mosquitto:1883
+    depends_on:
+      - mosquitto
+
+  # Dev/test-only MQTT broker (Phase 5, §15). Anonymous/unencrypted,
+  # matching the closed OT network assumption — see configs/mosquitto.conf.
+  # Not part of the production stack; production points MQTTConfig at the
+  # real internal broker.
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./gateway/configs/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
 
   web:
     build:

@@ -8,6 +8,7 @@ import (
 
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
+	"nxiiot-gateway/internal/diagnostics"
 )
 
 // Manager supervises one Poller goroutine per enabled device and keeps them
@@ -32,12 +33,12 @@ type runningDevice struct {
 	dps    []datapoint.DataPoint
 }
 
-func NewManager(ctx context.Context, log *slog.Logger, deviceRepo *device.Repository, datapointRepo *datapoint.Repository, onReading OnReading) *Manager {
+func NewManager(ctx context.Context, log *slog.Logger, deviceRepo *device.Repository, datapointRepo *datapoint.Repository, onReading OnReading, diag *diagnostics.Store) *Manager {
 	return &Manager{
 		log:           log,
 		deviceRepo:    deviceRepo,
 		datapointRepo: datapointRepo,
-		poller:        NewPoller(log, onReading),
+		poller:        NewPoller(log, onReading, diag),
 		parentCtx:     ctx,
 		running:       make(map[int64]*runningDevice),
 	}

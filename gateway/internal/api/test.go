@@ -106,7 +106,7 @@ func (s *Server) testDataPointRead(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(d.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
-	raw, err := modbus.ReadWithRetry(ctx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, d.Retry)
+	raw, _, err := modbus.ReadWithRetry(ctx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, d.Retry)
 	if err != nil {
 		result.Quality = string(modbus.QualityFromError(err))
 		result.Error = err.Error()

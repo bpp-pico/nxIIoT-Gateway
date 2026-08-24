@@ -119,6 +119,14 @@ func (r *Repository) query(ctx context.Context, query string, args ...any) ([]Da
 	return points, rows.Err()
 }
 
+// CountAll returns the total number of data points across every device —
+// for the Dashboard "Data Point Count" widget (§16).
+func (r *Repository) CountAll(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM datapoint`).Scan(&count)
+	return count, err
+}
+
 // Get returns a single data point by id, or ErrNotFound.
 func (r *Repository) Get(ctx context.Context, id int64) (DataPoint, error) {
 	row := r.db.QueryRowContext(ctx, `SELECT `+selectColumns+` FROM datapoint WHERE id = ?`, id)

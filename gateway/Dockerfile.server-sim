@@ -1,5 +1,6 @@
 # Dev/test-only fake "Internal Server", used to exercise Store & Forward
-# without a real MQTT broker/server. Not part of the production gateway image.
+# end-to-end over HTTP and/or MQTT (see cmd/server-sim). Not part of the
+# production gateway image.
 FROM golang:1.25-alpine AS build
 
 WORKDIR /app

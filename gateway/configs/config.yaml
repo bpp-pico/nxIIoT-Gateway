@@ -16,6 +16,7 @@ queue:
   evict_batch_size: 100
 
 forwarder:
+  transport: "http" # "http" (dev/test, cmd/server-sim) or "mqtt"
   server_url: "http://localhost:9000/ingest"
   batch_size: 100
   poll_interval_ms: 1000
@@ -28,8 +29,25 @@ log:
 mqtt:
   broker_url: "tcp://localhost:1883"
   client_id: "GW001"
+  username: ""
+  password: ""
   qos: 1
+  data_topic: "" # default: gateway/<client_id>/data
+  ack_topic: "" # default: gateway/<client_id>/ack
+  keepalive_seconds: 30
+  connect_timeout_ms: 5000
+  publish_timeout_ms: 5000
+  ack_timeout_ms: 10000
+  tls:
+    enabled: false
+    ca_file: ""
+    cert_file: ""
+    key_file: ""
+    insecure_skip_verify: false
 
 time:
-  ntp_server: ""
+  ntp_server: "" # e.g. the internal network's NTP server; empty disables NTP sync (falls back to RTC/local clock)
   timezone: "UTC"
+  sync_interval_seconds: 300
+  query_timeout_ms: 3000
+  rtc_device: "/dev/rtc0" # Linux only; ignored elsewhere
