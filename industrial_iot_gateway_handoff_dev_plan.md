@@ -1281,6 +1281,7 @@ MVP is complete when:
 
 ## V2
 
+- [ ] **Multi-COM-port RTU with per-port device sharing** — idea floated during Pi deployment planning: a Pi with 4 physical COM ports, up to 32 RTU devices per port (128 total), all 4 ports polled in parallel. Technically sound (4 RS-485 buses are genuinely independent; 32 slave IDs per bus is well within Modbus RTU's 1-247 range) but needs an `internal/acquisition` change first — today `Poller` opens one serial connection per *device*, not per *port*, which breaks for RTU multi-drop (multiple devices sharing one physical bus must be polled sequentially through a single shared connection, not concurrently; RS-485 is half-duplex and most OSes won't even allow two handles on the same port simultaneously). Needs devices grouped by `Interface` (COM port) into one poller loop per port, cycling through each device's data points by slave ID, while keeping independent concurrency across ports (and keeping TCP devices as-is — they have no such physical-sharing constraint). Deliberately deferred: verify a single COM port works end-to-end against real hardware first (§29 / DEPLOY_PLAN.md), then revisit this.
 - [ ] HTTPS server adapter
 - [ ] User management
 - [ ] Role-based access
