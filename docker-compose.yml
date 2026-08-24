@@ -11,8 +11,10 @@ services:
     environment:
       - CGO_ENABLED=0
       - SEED_DEMO_DEVICE=true
+      - FORWARDER_SERVER_URL=http://server-sim:9000/ingest
     depends_on:
       - modbus-sim
+      - server-sim
     # RS-485/USB-serial adapters are not visible inside a container unless
     # explicitly passed through, so the COM port dropdown (GET
     # /api/system/serial-ports) is empty by default here. On a Linux host
@@ -29,6 +31,16 @@ services:
       dockerfile: Dockerfile.modbus-sim
     ports:
       - "1502:502"
+
+  # Dev/test-only fake "Internal Server" standing in for the real MQTT
+  # broker/server (Phase 5) so Store & Forward can be exercised end-to-end.
+  # Not part of the production stack.
+  server-sim:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile.server-sim
+    ports:
+      - "9000:9000"
 
   web:
     build:

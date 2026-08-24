@@ -13,6 +13,8 @@ import (
 	"nxiiot-gateway/internal/config"
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
+	"nxiiot-gateway/internal/forwarder"
+	"nxiiot-gateway/internal/queue"
 	"nxiiot-gateway/internal/status"
 	"nxiiot-gateway/internal/system"
 )
@@ -25,9 +27,11 @@ type Server struct {
 	datapointRepo *datapoint.Repository
 	status        *status.Store
 	manager       *acquisition.Manager
+	queueRepo     *queue.Repository
+	forwarder     *forwarder.Forwarder
 }
 
-func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *status.Store, manager *acquisition.Manager) http.Handler {
+func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *status.Store, manager *acquisition.Manager, queueRepo *queue.Repository, fwd *forwarder.Forwarder) http.Handler {
 	s := &Server{
 		cfg:           cfg,
 		db:            db,
@@ -36,6 +40,8 @@ func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *st
 		datapointRepo: datapoint.NewRepository(db),
 		status:        statusStore,
 		manager:       manager,
+		queueRepo:     queueRepo,
+		forwarder:     fwd,
 	}
 
 	r := chi.NewRouter()
@@ -60,8 +66,8 @@ func NewRouter(cfg *config.Config, db *sql.DB, log *slog.Logger, statusStore *st
 		r.Post("/devices/{id}/test", s.testDeviceConnection)
 		r.Post("/datapoints/{id}/test", s.testDataPointRead)
 
-		r.Get("/store-forward/status", s.notImplemented)
-		r.Get("/store-forward/statistics", s.notImplemented)
+		r.Get("/store-forward/status", s.getStoreForwardStatus)
+		r.Get("/store-forward/statistics", s.getStoreForwardStatistics)
 
 		r.Get("/logs", s.notImplemented)
 

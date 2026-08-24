@@ -15,6 +15,7 @@ import (
 	"nxiiot-gateway/internal/config"
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
+	"nxiiot-gateway/internal/forwarder"
 	"nxiiot-gateway/internal/logger"
 	"nxiiot-gateway/internal/processor"
 	"nxiiot-gateway/internal/queue"
@@ -46,6 +47,13 @@ func main() {
 		seedDemoDevice(db, log)
 	}
 
+	// docker-compose reaches the fake server via its service DNS name
+	// ("server-sim"), whereas a native run reaches it via localhost — the
+	// config file default is the native/localhost case.
+	if url := os.Getenv("FORWARDER_SERVER_URL"); url != "" {
+		cfg.Forwarder.ServerURL = url
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
@@ -64,6 +72,13 @@ func main() {
 	go queue.RunRetentionSweeper(ctx, queueRepo,
 		time.Duration(cfg.Queue.RetentionDays)*24*time.Hour,
 		time.Duration(cfg.Queue.SweepInterval)*time.Minute,
+		log)
+
+	go queue.RunStoragePressureSweeper(ctx, queueRepo,
+		func() (float64, error) { return storage.DiskUsagePercent(cfg.Database.Path) },
+		cfg.Queue.StorageFullPercent,
+		cfg.Queue.EvictBatchSize,
+		time.Duration(cfg.Queue.StorageSweepInterval)*time.Second,
 		log)
 
 	// Acquisition must never depend on the API server or any downstream
@@ -87,7 +102,16 @@ func main() {
 		log.Error("failed to start acquisition", "error", err)
 	}
 
-	handler := api.NewRouter(cfg, db, log, statusStore, manager)
+	// Store & Forward runs independently of acquisition (Rule 1): a down
+	// server only grows the PENDING backlog, it never blocks Modbus polling.
+	adapter := forwarder.NewHTTPAdapter(cfg.Forwarder.ServerURL, time.Duration(cfg.Forwarder.SendTimeoutMs)*time.Millisecond)
+	fwd := forwarder.New(queueRepo, adapter, forwarder.Config{
+		BatchSize:    cfg.Forwarder.BatchSize,
+		PollInterval: time.Duration(cfg.Forwarder.PollIntervalMs) * time.Millisecond,
+	}, log)
+	go fwd.Run(ctx)
+
+	handler := api.NewRouter(cfg, db, log, statusStore, manager, queueRepo, fwd)
 	srv := &http.Server{
 		Addr:    cfg.API.ListenAddr,
 		Handler: handler,

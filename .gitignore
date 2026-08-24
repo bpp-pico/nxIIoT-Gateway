@@ -8,6 +8,8 @@ gateway/gateway
 gateway/gateway.exe
 gateway/gateway_native*.log
 gateway/gateway_native_pid.xml
+gateway/server-sim.exe
+gateway/server_sim*.log
 /data/
 
 # Node / Vite

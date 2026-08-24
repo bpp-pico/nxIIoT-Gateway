@@ -955,26 +955,36 @@ Every acquired data point is persistently stored.
 
 Tasks:
 
-- [ ] Queue state machine
-- [ ] PENDING
-- [ ] SENDING
-- [ ] SENT
-- [ ] FAILED
-- [ ] Retry
-- [ ] Exponential backoff
-- [ ] Batch processing
-- [ ] Queue recovery
-- [ ] Server connectivity detection
-- [ ] Storage threshold
-- [ ] Storage full policy
-- [ ] Historical data forwarding
-- [ ] Current data priority
+- [x] Queue state machine
+- [x] PENDING
+- [x] SENDING
+- [x] SENT
+- [x] FAILED (transient — a failed send goes SENDING → PENDING directly, in the same transaction that records the error/retry_count, matching the doc's diagram in spirit: nothing ever rests observably in FAILED)
+- [x] Retry
+- [x] Exponential backoff (1,2,4,8,16,32,60,60,... — pinned exactly by `TestBackoffDurationMatchesDesignDocSequence`)
+- [x] Batch processing (configurable `forwarder.batch_size`, default 100)
+- [x] Queue recovery (`RecoverSendingToPending`, run once at forwarder startup — a row stuck SENDING from an unclean shutdown is retried, never lost or double-counted)
+- [x] Server connectivity detection (tracked from each send attempt's outcome, surfaced via `GET /api/store-forward/status`)
+- [x] Storage threshold (`GET /api/store-forward/status` reports live disk-usage % via `internal/storage.DiskUsagePercent`, gopsutil-based)
+- [x] Storage full policy (`EvictOldestNonCritical`: deletes oldest non-CRITICAL rows, LOW first then NORMAL then HIGH, once usage crosses `queue.storage_full_percent` (default 95%); CRITICAL is never evicted)
+- [x] Historical data forwarding (FIFO by sequence_id within a priority tier — a large backlog still drains in order, never stalls)
+- [x] Current data priority (batches are selected CRITICAL → HIGH → NORMAL → LOW first, so newly-tagged high-priority readings jump a LOW-priority backlog)
+
+Implementation: `gateway/internal/queue` (dispatch.go: FetchBatch/MarkSent/MarkFailed/RecoverSendingToPending/Stats; backoff.go; storagepolicy.go), `gateway/internal/forwarder` (Forwarder — the state machine loop; Adapter interface so the transport is swappable per §15; HTTPAdapter as the dev/test transport ahead of Phase 5's MQTT adapter). Migration `0003_data_queue_retry.sql` adds `next_attempt_at` for backoff scheduling.
+
+Dev/test-only fake server: `gateway/cmd/server-sim` (mirrors `cmd/modbus-sim`'s role for Phase 1) — a minimal HTTP "Internal Server" that deduplicates on `gateway_id + sequence_id`, demonstrating the server-side half of Rule 7/10 (at-least-once delivery + idempotent processing).
+
+Verified live, all three of §23's scenarios A/B/C: forwarded a 137-row historical backlog left over from earlier phases correctly on startup (proving recovery + historical forwarding); stopped `server-sim` and confirmed Modbus acquisition kept running while `pending_records` grew and `server_connected` flipped false; restarted `server-sim` and confirmed the backlog drained to 0 with **zero duplicates** on the server side despite the retries during the outage (`gateway_id + sequence_id` idempotency holds under real retry conditions, not just in theory).
+
+Bug found and fixed along the way: migration 0003 originally used `DEFAULT (strftime(...))` for the new column — SQLite's `ALTER TABLE ADD COLUMN` rejects a non-constant default on a table that already has rows (it would need to backfill each one), which only surfaced against the native gateway's real database (carrying rows from earlier phases), not against fresh-per-test temp databases where the restriction doesn't trigger. Fixed with a constant epoch default, which is functionally equivalent here.
 
 Deliverable:
 
 ```text
 Server can be disconnected without stopping data acquisition.
 ```
+
+Verified — see above.
 
 ---
 

@@ -11,6 +11,15 @@ database:
 queue:
   retention_days: 30
   sweep_interval_minutes: 60
+  storage_full_percent: 95
+  storage_sweep_interval_seconds: 60
+  evict_batch_size: 100
+
+forwarder:
+  server_url: "http://localhost:9000/ingest"
+  batch_size: 100
+  poll_interval_ms: 1000
+  send_timeout_ms: 5000
 
 log:
   level: "debug"

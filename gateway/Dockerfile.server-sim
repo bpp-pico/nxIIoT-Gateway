@@ -1,0 +1,14 @@
+# Dev/test-only fake "Internal Server", used to exercise Store & Forward
+# without a real MQTT broker/server. Not part of the production gateway image.
+FROM golang:1.25-alpine AS build
+
+WORKDIR /app
+COPY go.mod go.sum* ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/server-sim ./cmd/server-sim
+
+FROM alpine:3.20
+COPY --from=build /out/server-sim /server-sim
+EXPOSE 9000
+ENTRYPOINT ["/server-sim"]
