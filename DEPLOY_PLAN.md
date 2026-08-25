@@ -12,6 +12,30 @@ Three things in this codebase are written and unit-tested but have **never execu
 
 Tomorrow's job is closing those three gaps for real, plus getting a working dev loop running directly on the Pi.
 
+## Session 1 Log (2026-08-25) — read this first if resuming
+
+Deployed via SSH (Claude Code driving it directly, `nxge-admin@192.168.99.84`), Path B (native/systemd), on the Pi's **original SD card** — which is about to be swapped for a bigger one because it ran nearly out of space. **Everything below needs redoing on the new card**; nothing here persists across the swap except what's already pushed to GitHub (all of it — the running deployment used no uncommitted code).
+
+**What got done and confirmed working:**
+- Target machine: `NXGE-RPI`, Debian 13 "trixie" (aarch64), kernel `6.18.34+rpt-rpi-v8`. NetworkManager/`nmcli` 1.52.1 present by default (Bookworm+ requirement from §1 — trixie has it too).
+- SSH key-based auth set up (a new keypair was generated on the Windows dev machine, `~/.ssh/id_ed25519`, and its public key appended to the Pi's `~/.ssh/authorized_keys` using the password once). **This is gone once the SD card is replaced** — either re-run `ssh-copy-id` (or the manual `authorized_keys` append) against the new card's fresh `authorized_keys`, or reuse the same already-generated Windows-side keypair (it's still on the Windows machine, nothing to regenerate there).
+- Go 1.27.0 installed to `/usr/local/go` (official upstream tarball, not the apt package — apt's `golang-go` candidate was only 1.24, older than `go.mod`'s `go 1.25.0` requirement).
+- Repo cloned to `~/nxIIoT-Gateway` at commit `8f86707`. `cd gateway && go build -o gateway ./cmd/gateway` succeeded — **first successful native ARM64 build**, ~18.6MB binary. First build was slow (several minutes, `modernc.org/sqlite`'s generated Go source is large) but not stuck — worth knowing so it isn't mistaken for a hang next time either.
+- Deployed to `/opt/nxiiot-gateway` (binary + `configs/` + `migrations/`), `gateway/deploy/nxiiot-gateway.service` installed to `/etc/systemd/system/` and enabled — `systemctl status nxiiot-gateway` showed `active (running)`, migrations applied cleanly, `GET /api/system` responded normally.
+- **`internal/netconfig` confirmed working against real `nmcli` for the first time ever** (gap #3 from the intro above, closed): `GET /api/system/network` correctly reported `{"supported":true,"interface":"wlan0","method":"auto","address":"192.168.99.84",...}` — real interface, real IP, matching what we were actually SSH'd into. Only `Current()` was exercised; `ApplyStatic`/the confirm-or-revert flow (§6's checklist item) is still untested — do that once the new card is stable, with console access ready per §0.
+- Node.js 20.19.2 / npm 9.2.0 installed via apt, for running the Web UI with `npm run dev` (chosen over building static files, for the hot-reload dev loop).
+
+**What's blocked, and why the SD card is being swapped:**
+- Original card: 6.9GB total. Started at 87% used (already tight *before* any of this session's work — worth asking why, on a fresh-ish install). Installing Go pushed it further; installing Node.js/npm pushed it to **94% used, 400MB free**. `npm install` for the web frontend (React+Vite+TypeScript+oxlint, several hundred MB of `node_modules` on the Windows dev machine) was judged too risky to attempt on 400MB — a full disk mid-write is a real risk to the running SQLite database, not just an inconvenience. Stopped there, deliberately, rather than push through.
+- The Web UI was never actually reached in a browser this session — only the backend API was verified (`curl`).
+- RTU, RTC, and the netconfig `Apply`/revert flow — the other three checklist items in §6 — are all still open. No RTU hardware or RTC module was connected this session; today was entirely about getting the backend running and closing the netconfig `Current()` gap.
+
+**Resume steps on the new SD card** (assuming Raspberry Pi OS/Debian trixie or similar again):
+1. Re-flash, boot, SSH in — get a fresh IP/hostname noted (§0).
+2. Either push the existing Windows-side public key again, or start over with §2 of this doc (`git clone`, then Go/Node install per this log). All of §1-§4 needs re-running; none of it survives the card swap.
+3. Once storage isn't a concern: `cd ~/nxIIoT-Gateway/web && npm install && npm run dev` — Vite's proxy already defaults to `localhost:8080` (see `README.md`), so no `GATEWAY_API_URL` env var needed for the native-on-same-host setup.
+4. Then resume the §6 checklist from where it left off: RTU round-trip, RTC, netconfig `Apply`/confirm/revert, real MQTT broker, Settings-save restart under systemd.
+
 ## 0. Before you unplug anything
 
 - **Have a way back in that doesn't depend on the network working.** A monitor + keyboard on the Pi, or physical access to re-flash the SD card, before testing the network-IP feature specifically. The confirm-or-auto-revert safety net (`internal/netconfig`, 45s window) is real and unit-tested, but it has never run against real `nmcli` — don't bet the only way to reach the device on code that's never executed for real. Test that feature last, once everything else is confirmed working, and only with physical console access as a fallback.
@@ -96,11 +120,11 @@ Everything above is also editable from the Web UI's Config page (§29) once the 
 
 Work through these in order — each depends on the previous one actually working. Update `industrial_iot_gateway_handoff_dev_plan.md` §29 (and the "Known gaps" sections in `README.md`/`HANDOFF.md`) with the real results once done, the same way every other phase in this project was closed out — "verified live" with actual command output, not "should work now."
 
-- [ ] Gateway starts cleanly on the Pi (Docker or native), `GET /api/system` responds, `uname -m`/`go version` noted for the record.
+- [x] Gateway starts cleanly on the Pi (native/systemd), `GET /api/system` responds, `uname -m`/`go version` noted for the record — done in Session 1, needs redoing on the new SD card (nothing here survives the swap).
 - [ ] **RTU round-trip**: add the real device + a data point matching a known register on the meter, confirm `quality: "GOOD"` and a sane decoded value via Test Read or the Devices page — this is the single most important box on this list, since it's never been checked at all.
 - [ ] RTU failure paths against the real device: unplug the adapter mid-poll (expect `DEVICE_OFFLINE`), and if you can force a bad response somehow, confirm `CRC_ERROR` shows up for real (the classification logic is tested, actually triggering it from real hardware is not).
 - [ ] **RTC**: `GET /api/time` shows `rtc_status: true` (currently always `false` — no hardware exists to make it otherwise until now). Pull NTP connectivity and confirm `time_quality` degrades to `RTC` using the real chip, not the fake one from `service_test.go`. Power-cycle the Pi with NTP unreachable and confirm the RTC still has a sane time (not reset to epoch).
-- [ ] **Network IP** (native/systemd path only, console access ready per §0): `GET /api/system/network` should now report `"supported": true` with real interface/address data instead of `{"supported": false}`. Apply a *safe* test change first (e.g. a static IP still on the same subnet you're already reachable at) before trying anything that changes subnets. Deliberately let one change time out unconfirmed and verify it actually reverts.
+- [x]/[ ] **Network IP** (native/systemd path only, console access ready per §0): `Current()` confirmed in Session 1 (`"supported": true`, real `wlan0`/IP/gateway/DNS) — **still open**: actually `Apply` a *safe* test change (e.g. a static IP still on the same subnet you're already reachable at) before trying anything that changes subnets, and deliberately let one change time out unconfirmed to verify it actually reverts. Redo the `Current()` check too on the new card, don't just assume it still works.
 - [ ] MQTT/Store & Forward against the real internal broker (not `mosquitto` dev container) — same verification style as Phase 5: stop reachability to the broker, confirm the backlog grows and Modbus polling is unaffected, restore it, confirm the backlog drains with no duplicates.
 - [ ] Settings save + restart (§29) actually reaches back up under `systemctl`/`Restart=always` on the native path, not just Docker Compose's `restart: unless-stopped` (only the latter has been exercised).
 
