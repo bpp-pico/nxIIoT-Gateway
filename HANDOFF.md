@@ -1,15 +1,10 @@
-# Handoff — nxIIoT Gateway (MVP complete, Phases 0-8 + post-MVP Settings/Network IP)
+# Handoff — nxIIoT Gateway (MVP complete, Phases 0-8 + post-MVP Settings/Network IP + Internal Server)
 
-Status as of this handoff. For the full design spec and per-phase task checklists (with implementation notes inline), see [industrial_iot_gateway_handoff_dev_plan.md](industrial_iot_gateway_handoff_dev_plan.md) — §24 for the Definition of Done, §29 for the post-MVP addition described below. For day-to-day dev commands, see [README.md](README.md). This document is the orientation layer: what's true right now, what to watch out for, and where to pick up.
+Status as of this handoff. For the full design spec and per-phase task checklists (with implementation notes inline), see [industrial_iot_gateway_handoff_dev_plan.md](industrial_iot_gateway_handoff_dev_plan.md) — §24 for the Definition of Done, §29 for the post-MVP Settings/Network IP addition, §30 for the Internal Server. For day-to-day dev commands, see [README.md](README.md). For the Raspberry Pi deployment history (three sessions so far) see [DEPLOY_PLAN.md](DEPLOY_PLAN.md). This document is the orientation layer: what's true right now, what to watch out for, and where to pick up.
 
 ## Git state
 
-- **Committed and pushed** to `origin/master` (https://github.com/bpp-pico/nxIIoT-Gateway.git):
-  - `01a0614` — Phases 0-3: project setup, Modbus engine, device management, persistent storage.
-  - `d0b4656` — Phase 4: Store & Forward.
-  - `f11c8b2` — Phases 5-8: MQTT, Time Service, Web UI, Reliability.
-- **Uncommitted**: the post-MVP Web UI Settings + host network IP feature (§29) — `internal/netconfig` (new), `internal/api/settings.go` + `network.go` (new), `gateway/deploy/nxiiot-gateway.service` (new), plus edits to `router.go`, `main.go`, `config.go`, `docker-compose.yml`, `ConfigPage.tsx`, `api.ts`, `types.ts`, and both `README.md`/this file. Run `git status` and commit when ready; nothing destructive is pending.
-- Git committer identity was auto-detected from the OS account the first time, then explicitly set to `bpp-pico <banpot@pico.co.th>` for the push — matches what's in the repo now.
+Everything through the Internal Server addition and the current Raspberry Pi deployment is committed and pushed to `origin/master` (https://github.com/bpp-pico/nxIIoT-Gateway.git) — working tree is clean on the Windows dev machine as of this handoff. Run `git log --oneline` for the authoritative, current history rather than trusting a commit list copied into this doc (it goes stale fast — this project is now on its third Pi deployment session and its own separate `internal-server/` service). Git committer identity: `bpp-pico <banpot@pico.co.th>`.
 
 ## What's implemented
 
@@ -25,11 +20,12 @@ Status as of this handoff. For the full design spec and per-phase task checklist
 | 7 | Web UI: Dashboard (CPU/RAM/storage/network/queue/time widgets), Store & Forward/Time/Diagnostics/Logs/Config pages; backend diagnostics counters, in-memory log ring buffer, config export/import | `internal/diagnostics`, `internal/logger/ringbuffer.go`, `internal/api` (configio.go, dashboard.go, diagnostics.go, logs.go), `web/src/pages` |
 | 8 | Storage WARNING/CRITICAL/FULL levels (§17); chaos-tested SIGKILL power failure and full network partition, which surfaced and fixed a DNS-classification bug | `internal/queue/storagepolicy.go`, `internal/modbus/quality.go` |
 | post-MVP | Web UI Settings (Gateway/MQTT/Time → `config.yaml` + auto-restart), host network IP config (`nmcli`-backed, confirm-or-auto-revert safety net) | `internal/netconfig`, `internal/api` (settings.go, network.go) |
+| post-MVP | **Internal Server** (§30): the real, always-on MQTT consumer `cmd/server-sim` was always a stand-in for — subscribes `gateway/+/data`, dedupes into Postgres on `gateway_id`+`sequence_id`, acks back, serves a live dashboard + JSON API | `internal-server/` (separate Go module, own Docker Compose stack — not part of `gateway/`) |
 
 Three dev-only simulators exist purely to make the above testable without physical hardware or a real server — never deployed to production:
 - `cmd/modbus-sim` — fake Modbus TCP slave (Phase 1)
-- `cmd/server-sim` — fake "Internal Server" that dedupes on `gateway_id`+`sequence_id`, speaking both HTTP and MQTT (Phase 4/5)
-- `mosquitto` (docker-compose service, not Go code) — dev-only MQTT broker, anonymous/unencrypted (Phase 5)
+- `cmd/server-sim` — fake "Internal Server" that dedupes on `gateway_id`+`sequence_id`, speaking both HTTP and MQTT (Phase 4/5) — now that `internal-server/` exists as the real thing, `server-sim`'s only remaining use is as a disposable stand-in to drain a backlog during testing (see DEPLOY_PLAN.md's Session 3 log)
+- `mosquitto` (docker-compose service, not Go code) — dev-only MQTT broker, anonymous/unencrypted (Phase 5) — the real deployment points at `mqtt.nxge.co` instead, both from the Pi gateway and from `internal-server/`
 
 ## Architecture decisions worth knowing before touching this code
 
@@ -71,16 +67,18 @@ Stop the Dockerized `gateway`/`web` containers first to free ports 8080/5173.
 
 ## Known gaps / untested paths (be honest about these, don't assume they work)
 
-- **RTU**: full read round-trip now verified for real (Raspberry Pi deployment, Session 2, 2026-08-25) — a CH340 USB-RS485 adapter plus a real RTU temp/humidity sensor (slave ID 1, function code 04, registers 1/2, `INT16`×0.1), `Test Read` returned `27.1°C`/`58.5%RH` at `quality: "GOOD"`, user-confirmed plausible, and the live polling loop was confirmed writing real decoded readings into `data_queue`. **Still open**: the real-hardware CRC-error/`DEVICE_OFFLINE` failure paths (unplug mid-poll, forced bad response) — not yet attempted. The CRC *classification logic itself* was already tested for real (`TestQualityFromErrorCRCMismatch`, against goburrow/modbus's actual frame decoder), just not triggered from live hardware yet.
+- **RTU**: full read round-trip verified for real (Raspberry Pi deployment, Session 2, 2026-08-25) — a CH340 USB-RS485 adapter plus a real RTU temp/humidity sensor (slave ID 1, function code 04, registers 1/2, `INT16`×0.1). **Session 3 (2026-08-26) found and documented a real hardware limit**: this specific sensor returns `quality: "GOOD"` at 500ms and 250ms polling intervals, but **times out completely** (`quality: "TIMEOUT"` on every read) at 200ms and 100ms — the sensor's own internal response latency, not a gateway bug. Currently deployed at 250ms (device 1 + both data points). The exact breaking point between 200-250ms was not pinned down further. **Still open**: the real-hardware CRC-error/`DEVICE_OFFLINE` failure paths (unplug mid-poll, forced bad response) — not yet attempted. The CRC *classification logic itself* was already tested for real (`TestQualityFromErrorCRCMismatch`, against goburrow/modbus's actual frame decoder), just not triggered from live hardware yet.
 - **RTC hardware**: `internal/time/rtc_linux.go`'s `/dev/rtc0` ioctls cross-compile clean (`GOOS=linux GOARCH=amd64 go build`) but have never run against a physical RTC chip — no such hardware in this dev environment. The NTP-fails/RTC-available fallback transition is proven only via a fake RTC in unit tests.
 - **Host network IP (`internal/netconfig`)**: `Current()` is now confirmed live against a real Pi's `nmcli`/NetworkManager (Session 1, re-confirmed on a fresh SD card in Session 2 — see `DEPLOY_PLAN.md`'s session logs), correctly reporting the real `wlan0` interface/IP/gateway/DNS. `ApplyStatic`/the confirm-or-auto-revert flow is still unverified — deliberately deferred until physical console access is arranged, since a bad static-IP apply could lock out the only remote path to the device.
+- **MQTT reconnect can silently stop delivering acks without ever reporting "connection lost."** Session 3 (2026-08-26) found the Pi's gateway stuck for 4.5 hours with `server_connected: false` and every batch timing out waiting for an ack, despite paho never logging a disconnect — `onConnect`'s ack-topic re-subscribe (`gateway/internal/forwarder/mqttadapter.go`) can lose a race with a fast reconnect and, on failure, only logs and gives up (no retry). A `systemctl restart` cleared it. **Root cause for that specific incident turned out to be something else** (no real Internal Server was running to consume `gateway/+/data` and publish acks — see below), but the missing subscribe-retry is still a real gap in `mqttadapter.go`'s `onConnect`, worth hardening; `internal-server/consumer.go`'s `subscribeWithRetry` (3 attempts, short backoff) was written specifically to not repeat this on the consumer side and is a reasonable pattern to port back.
 - **`word_order`** is a stored-but-unused datapoint field — `byte_order` alone (e.g. `"ABCD"`/`"BADC"`) already fully specifies both byte and word order for 32/64-bit types. Documented in `internal/modbus/decode.go`.
 - **Config save (§29) is a full-file re-marshal.** Editing `config.yaml` by hand and then saving once from the Web UI will silently discard those hand-written comments/formatting. Not a bug, but a footgun worth remembering.
 
 ## Next
 
-MVP (Phases 0-8) and the post-MVP Settings/Network IP addition are both done, per the honest caveats above. There is no pending "Phase 9" in the design doc — remaining work is either:
+MVP (Phases 0-8), the post-MVP Settings/Network IP addition, and the Internal Server (§30) are all done, per the honest caveats above. There is no pending "Phase 9" in the design doc — remaining work is either:
 - **V2/V3 roadmap** items from §25 of the design doc (HTTPS adapter, user management, alarm management, fleet management, OTA updates, ...), or
-- **Closing the remaining RPi-only gaps**: a real RTC chip (never connected in any session so far) and the `netconfig.ApplyStatic`/confirm-revert flow (deliberately not attempted without physical console access — see `DEPLOY_PLAN.md` §0). RTU round-trip and real-broker MQTT are now both closed (Session 2, 2026-08-25) — see `DEPLOY_PLAN.md`'s session logs for details.
+- **Closing the remaining RPi-only gaps**: a real RTC chip (never connected in any session so far) and the `netconfig.ApplyStatic`/confirm-revert flow (deliberately not attempted without physical console access — see `DEPLOY_PLAN.md` §0). RTU round-trip and real-broker MQTT are both closed as of Session 2/3 — see `DEPLOY_PLAN.md`'s session logs for details.
+- **Making `internal-server/` actually durable**: right now it runs via `docker compose up` on the Windows dev laptop, not on an always-on host — if that laptop/Docker stops, the Pi's backlog just grows again (harmlessly, by design) until it's restarted. Moving it to a real always-on host (ideally alongside the `mqtt.nxge.co` broker itself) and rotating its dev-shaped Postgres credentials (`internal_server`/`internal_server`) are both open before calling it production-ready.
 
-Whoever picks this up next should decide which of those is the priority rather than assume — nothing in the current codebase blocks either path.
+Whoever picks this up next should decide which of those is the priority rather than assume — nothing in the current codebase blocks any of these paths.

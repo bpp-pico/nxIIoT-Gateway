@@ -1,6 +1,6 @@
 # nxIIoT Gateway
 
-Industrial IoT Gateway for Modbus RTU/TCP acquisition, local store & forward, and MQTT delivery to an internal server. See [industrial_iot_gateway_handoff_dev_plan.md](industrial_iot_gateway_handoff_dev_plan.md) for the full design and phased development plan, and [HANDOFF.md](HANDOFF.md) for the current orientation snapshot (architecture decisions, known gaps, what's next).
+Industrial IoT Gateway for Modbus RTU/TCP acquisition, local store & forward, and MQTT delivery to an internal server. See [industrial_iot_gateway_handoff_dev_plan.md](industrial_iot_gateway_handoff_dev_plan.md) for the full design and phased development plan, and [HANDOFF.md](HANDOFF.md) for the current orientation snapshot (architecture decisions, known gaps, what's next). The real "internal server" the gateway forwards to lives in [internal-server/](internal-server/) (its own Go module and Docker Compose stack, separate from `gateway/`) — see its section below.
 
 ## Stack
 
@@ -68,9 +68,25 @@ and the frontend natively too (`cd web && npm run dev` — its Vite proxy alread
 ## Project layout
 
 ```
-gateway/    Go backend (cmd/gateway, cmd/modbus-sim, cmd/server-sim, internal/, migrations/, configs/, deploy/)
-web/        React + TypeScript frontend
+gateway/          Go backend (cmd/gateway, cmd/modbus-sim, cmd/server-sim, internal/, migrations/, configs/, deploy/)
+web/               React + TypeScript frontend
+internal-server/   The real MQTT consumer the gateway forwards to in production — separate Go module + Docker Compose stack
 ```
+
+## Internal Server (`internal-server/`)
+
+`cmd/server-sim` (inside `gateway/`) is a dev-only, in-memory stand-in for testing Store & Forward without a real backend — it was never meant to run continuously. `internal-server/` is the real thing: subscribes `gateway/+/data` on the MQTT broker, persists every reading to Postgres (deduped on `gateway_id`+`sequence_id`, the same idempotency key the gateway itself uses), and publishes the application-level ack back on `gateway/{id}/ack` so Store & Forward can retire the batch.
+
+```bash
+cd internal-server
+docker compose up -d --build
+```
+
+- Dashboard: http://localhost:9100/dashboard (also served at `/`) — live stat tiles with sparklines per gateway/device/datapoint, per-gateway totals, and a filterable recent-readings table.
+- JSON API: `GET /health`, `GET /latest`, `GET /readings?gateway_id=&device_id=&datapoint_id=&limit=`, `GET /stats`.
+- Configure which broker it points at via the `MQTT_BROKER_URL` env var in `internal-server/docker-compose.yml` (defaults to the real `mqtt.nxge.co:1883`, not the dev `mosquitto` service in the root `docker-compose.yml` — these are two separate brokers for two separate purposes).
+
+Not yet production-hardened: it currently runs on whatever machine you start it on (no always-on host assigned yet), and its Postgres credentials are dev-shaped defaults (`internal_server`/`internal_server`) — see HANDOFF.md's "Next" section.
 
 ## Status
 
@@ -81,6 +97,11 @@ MVP (Phases 0-8) is complete — see [industrial_iot_gateway_handoff_dev_plan.md
 - **Phase 6 — Time Service**: hand-rolled SNTP client, Linux hardware RTC (`/dev/rtc0` ioctls, cross-compiled clean but untested against physical hardware), SYNCED/RTC/UNSYNCED/INVALID quality state machine.
 - **Phase 7 — Web UI**: all seven tabs above, verified live in a real headless-Chromium browser session (zero console errors) plus a real config export/import round trip.
 - **Phase 8 — Reliability**: chaos-tested the live stack — a `SIGKILL` power-failure simulation and a full `docker network disconnect` network partition (which surfaced and fixed a real DNS-classification bug). Cumulative duplicate check across all of this project's chaos testing: 4747/4747 unique `gateway_id+sequence_id` keys.
-- **Post-MVP**: Web UI Settings (Gateway/MQTT/Time, save + auto-restart) and host network IP configuration (`internal/netconfig`, Linux/NetworkManager only — untested against real hardware, deferred to Raspberry Pi deployment per explicit instruction).
+- **Post-MVP**: Web UI Settings (Gateway/MQTT/Time, save + auto-restart), host network IP configuration (`internal/netconfig`, Linux/NetworkManager only), and the real Internal Server (`internal-server/`, see its section above).
+- **Raspberry Pi deployment** (three sessions so far, `DEPLOY_PLAN.md`): the gateway now runs natively on a real Pi (Debian 13 trixie, aarch64) under systemd, with a real CH340 USB-RS485 adapter and RTU temp/humidity sensor delivering `GOOD` readings, forwarding over a real MQTT broker (`mqtt.nxge.co`) to the real Internal Server above, and Settings-save-triggered restarts verified under `systemctl`.
 
-**Known, honestly-documented gaps** (not silently assumed to work): a full Modbus RTU read round-trip and the RTU CRC-error path have never been exercised against a physical responding RTU slave (only connection-level verified against real USB-RS485 hardware); the Linux RTC ioctl code and the `nmcli`-based network config code both cross-compile/parse-test clean but have never run against physical hardware. Both are Raspberry Pi deployment tasks, not desk-testable in this Windows/Docker dev environment.
+**Known, honestly-documented gaps** (not silently assumed to work):
+- Full Modbus RTU read round-trip: **now verified live** against a real sensor (see above) — including finding a real hardware limit (this sensor times out below ~250ms polling interval, see `HANDOFF.md`). Still open: the CRC-error/`DEVICE_OFFLINE` failure paths haven't been triggered from live hardware yet (unplug mid-poll, forced bad response).
+- Host network IP (`internal/netconfig`): `Current()` verified live against a real Pi's `nmcli`. `ApplyStatic`/the confirm-or-auto-revert flow is still unverified — deliberately deferred until physical console access is arranged, since a bad apply could lock out the only remote path to the device.
+- RTC: the Linux `/dev/rtc0` ioctl code cross-compiles/unit-tests clean but has never run against a physical RTC chip — no such hardware connected in any session so far.
+- `internal-server/` isn't on an always-on host yet, and its Postgres credentials are dev-shaped defaults — see `HANDOFF.md`'s "Next" section.
