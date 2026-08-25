@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Internal Server — nxIIoT Gateway</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:            #f9f9f7;
+    --surface-1:       #fcfcfb;
+    --text-primary:    #0b0b0b;
+    --text-secondary:  #52514e;
+    --text-muted:      #898781;
+    --gridline:        #e1e0d9;
+    --border:          rgba(11,11,11,0.10);
+    --series-1:        #2a78d6;
+    --series-1-wash:   rgba(42,120,214,0.10);
+    --status-good:     #0ca30c;
+    --status-critical: #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --page:            #0d0d0d;
+      --surface-1:       #1a1a19;
+      --text-primary:    #ffffff;
+      --text-secondary:  #c3c2b7;
+      --text-muted:      #898781;
+      --gridline:        #2c2c2a;
+      --border:          rgba(255,255,255,0.10);
+      --series-1:        #3987e5;
+      --series-1-wash:   rgba(57,135,229,0.14);
+      --status-good:     #0ca30c;
+      --status-critical: #e66767;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 28px 20px 60px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 22px; }
+  h1 { font-size: 20px; margin: 0 0 2px; }
+  .subtitle { color: var(--text-secondary); font-size: 13px; margin: 0; }
+
+  .health { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--text-secondary); }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-1); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .dot.good { background: var(--status-good); }
+  .dot.bad { background: var(--status-critical); }
+  .updated { font-size: 12px; color: var(--text-muted); }
+
+  section { margin-bottom: 32px; }
+  h2 { font-size: 14px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.02em; margin: 0 0 12px; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  .tile { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .tile-label { font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tile-value { font-size: 28px; font-weight: 600; line-height: 1.1; }
+  .tile-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; gap: 8px; }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .badge .dot { width: 6px; height: 6px; }
+  .badge.good { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 14%, transparent); }
+  .badge.bad { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 14%, transparent); }
+  .tile-time { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+  .sparkline { width: 100%; height: 32px; margin-top: 10px; display: block; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--gridline); font-variant-numeric: tabular-nums; }
+  th { color: var(--text-muted); font-weight: 500; font-size: 12px; }
+  td.num, th.num { text-align: right; }
+
+  .empty { color: var(--text-muted); font-size: 13px; padding: 20px 0; }
+
+  .section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .section-head h2 { margin: 0; }
+  .toolbar { display: flex; gap: 8px; align-items: center; }
+  select {
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-primary);
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+  }
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-1); }
+  .table-scroll table { min-width: 640px; }
+  .table-scroll th, .table-scroll td { padding: 7px 12px; }
+  .table-scroll tbody tr:last-child td { border-bottom: none; }
+  code.quality { font-size: 11px; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Internal Server</h1>
+        <p class="subtitle">Live MQTT sink for the nxIIoT Gateway fleet</p>
+      </div>
+      <div class="health">
+        <span class="pill"><span class="dot" id="db-dot"></span><span id="db-label">database</span></span>
+        <span class="pill"><span class="dot" id="mqtt-dot"></span><span id="mqtt-label">mqtt</span></span>
+        <span class="updated" id="updated">updating…</span>
+      </div>
+    </header>
+
+    <section>
+      <h2>Latest values</h2>
+      <div class="tiles" id="tiles"></div>
+      <div class="empty" id="tiles-empty" style="display:none;">No readings yet.</div>
+    </section>
+
+    <section>
+      <h2>Gateways</h2>
+      <table id="stats-table">
+        <thead>
+          <tr><th>Gateway</th><th class="num">Readings</th><th>Last received</th></tr>
+        </thead>
+        <tbody id="stats-body"></tbody>
+      </table>
+      <div class="empty" id="stats-empty" style="display:none;">No gateways reporting yet.</div>
+    </section>
+
+    <section>
+      <div class="section-head">
+        <h2>Recent readings</h2>
+        <div class="toolbar">
+          <select id="readings-gateway"><option value="">All gateways</option></select>
+          <select id="readings-limit">
+            <option value="25">25 rows</option>
+            <option value="50" selected>50 rows</option>
+            <option value="100">100 rows</option>
+            <option value="200">200 rows</option>
+          </select>
+        </div>
+      </div>
+      <div class="table-scroll">
+        <table id="readings-table">
+          <thead>
+            <tr>
+              <th>Event time</th>
+              <th>Gateway</th>
+              <th class="num">Device</th>
+              <th class="num">Datapoint</th>
+              <th class="num">Value</th>
+              <th>Quality</th>
+              <th>Received</th>
+            </tr>
+          </thead>
+          <tbody id="readings-body"></tbody>
+        </table>
+      </div>
+      <div class="empty" id="readings-empty" style="display:none;">No readings yet.</div>
+    </section>
+  </div>
+
+<script>
+const REFRESH_MS = 5000;
+const HISTORY_POINTS = 30;
+
+function relTime(iso) {
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 5) return 'just now';
+  if (d < 60) return Math.floor(d) + 's ago';
+  if (d < 3600) return Math.floor(d / 60) + 'm ago';
+  if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+  return Math.floor(d / 86400) + 'd ago';
+}
+
+function fmtValue(v) {
+  if (v === null || v === undefined) return '—';
+  const abs = Math.abs(v);
+  if (abs >= 1000) return (v / 1000).toFixed(1) + 'K';
+  return Number.isInteger(v) ? String(v) : v.toFixed(1);
+}
+
+function sparklinePath(values) {
+  if (values.length < 2) return { line: '', area: '' };
+  const w = 120, h = 32, pad = 3;
+  const min = Math.min(...values), max = Math.max(...values);
+  const range = max - min || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * w;
+    const y = h - pad - ((v - min) / range) * (h - pad * 2);
+    return [x, y];
+  });
+  const line = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  const area = line + ` L${w},${h} L0,${h} Z`;
+  return { line, area };
+}
+
+async function getJSON(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(url + ': ' + res.status);
+  return res.json();
+}
+
+function setHealth(dotId, labelId, ok, okText, badText) {
+  const dot = document.getElementById(dotId);
+  const label = document.getElementById(labelId);
+  dot.className = 'dot ' + (ok ? 'good' : 'bad');
+  label.textContent = ok ? okText : badText;
+}
+
+async function renderTiles() {
+  const latest = await getJSON('/latest');
+  const tilesEl = document.getElementById('tiles');
+  const emptyEl = document.getElementById('tiles-empty');
+
+  if (!latest || latest.length === 0) {
+    tilesEl.innerHTML = '';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  const histories = await Promise.all(latest.map(r =>
+    getJSON(`/readings?gateway_id=${encodeURIComponent(r.gateway_id)}&device_id=${r.device_id}&datapoint_id=${r.datapoint_id}&limit=${HISTORY_POINTS}`)
+      .catch(() => [])
+  ));
+
+  tilesEl.innerHTML = latest.map((r, i) => {
+    const isGood = r.quality === 'GOOD';
+    const values = histories[i].map(h => h.value).filter(v => v !== null).reverse();
+    const { line, area } = sparklinePath(values);
+    const spark = line
+      ? `<svg class="sparkline" viewBox="0 0 120 32" preserveAspectRatio="none">
+           <path d="${area}" fill="var(--series-1-wash)" stroke="none"></path>
+           <path d="${line}" fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>
+         </svg>`
+      : '';
+    return `
+      <div class="tile">
+        <div class="tile-label">${r.gateway_id} · device ${r.device_id} · point ${r.datapoint_id}</div>
+        <div class="tile-value">${fmtValue(r.value)}</div>
+        <div class="tile-row">
+          <span class="badge ${isGood ? 'good' : 'bad'}"><span class="dot"></span>${r.quality}</span>
+          <span class="tile-time">${relTime(r.received_at)}</span>
+        </div>
+        ${spark}
+      </div>`;
+  }).join('');
+}
+
+async function renderStats() {
+  const stats = await getJSON('/stats');
+  const body = document.getElementById('stats-body');
+  const empty = document.getElementById('stats-empty');
+  const table = document.getElementById('stats-table');
+
+  if (!stats || stats.length === 0) {
+    body.innerHTML = '';
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  table.style.display = '';
+  empty.style.display = 'none';
+
+  body.innerHTML = stats.map(s => `
+    <tr>
+      <td>${s.gateway_id}</td>
+      <td class="num">${s.count.toLocaleString()}</td>
+      <td>${relTime(s.last_received)}</td>
+    </tr>`).join('');
+
+  syncGatewayFilter(stats.map(s => s.gateway_id));
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function fmtDateTime(iso) {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+let knownGateways = [];
+
+function syncGatewayFilter(gatewayIDs) {
+  const changed = gatewayIDs.length !== knownGateways.length || gatewayIDs.some((g, i) => g !== knownGateways[i]);
+  if (!changed) return;
+  knownGateways = gatewayIDs;
+
+  const sel = document.getElementById('readings-gateway');
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All gateways</option>' +
+    gatewayIDs.map(g => `<option value="${escapeHTML(g)}">${escapeHTML(g)}</option>`).join('');
+  if (gatewayIDs.includes(current)) sel.value = current;
+}
+
+async function renderReadingsTable() {
+  const gatewayID = document.getElementById('readings-gateway').value;
+  const limit = document.getElementById('readings-limit').value;
+  const qs = new URLSearchParams({ limit });
+  if (gatewayID) qs.set('gateway_id', gatewayID);
+
+  const rows = await getJSON('/readings?' + qs.toString());
+  const body = document.getElementById('readings-body');
+  const empty = document.getElementById('readings-empty');
+  const table = document.getElementById('readings-table');
+
+  if (!rows || rows.length === 0) {
+    body.innerHTML = '';
+    table.style.display = 'none';
+    empty.style.display = 'block';
+    return;
+  }
+  table.style.display = '';
+  empty.style.display = 'none';
+
+  body.innerHTML = rows.map(r => {
+    const isGood = r.quality === 'GOOD';
+    return `
+      <tr>
+        <td>${fmtDateTime(r.event_timestamp)}</td>
+        <td>${escapeHTML(r.gateway_id)}</td>
+        <td class="num">${r.device_id}</td>
+        <td class="num">${r.datapoint_id}</td>
+        <td class="num">${fmtValue(r.value)}</td>
+        <td><span class="badge ${isGood ? 'good' : 'bad'}"><span class="dot"></span>${escapeHTML(r.quality)}</span></td>
+        <td>${relTime(r.received_at)}</td>
+      </tr>`;
+  }).join('');
+}
+
+async function renderHealth() {
+  const h = await getJSON('/health');
+  setHealth('db-dot', 'db-label', h.database_ok, 'Database connected', 'Database down');
+  setHealth('mqtt-dot', 'mqtt-label', h.mqtt_connected, 'MQTT connected', 'MQTT disconnected');
+}
+
+async function refresh() {
+  try {
+    await renderStats(); // populates the gateway filter before the table reads it
+    await Promise.all([renderHealth(), renderTiles(), renderReadingsTable()]);
+    document.getElementById('updated').textContent = 'updated just now';
+  } catch (e) {
+    document.getElementById('updated').textContent = 'update failed';
+    console.error(e);
+  }
+}
+
+document.getElementById('readings-gateway').addEventListener('change', renderReadingsTable);
+document.getElementById('readings-limit').addEventListener('change', renderReadingsTable);
+
+refresh();
+setInterval(refresh, REFRESH_MS);
+</script>
+</body>
+</html>

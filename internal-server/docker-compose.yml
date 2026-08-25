@@ -1,0 +1,38 @@
+services:
+  internal-server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "9100:9100"
+    environment:
+      # Points at the real broker the Pi gateway already uses in
+      # production (configs/config.yaml's mqtt.broker_url on the Pi) —
+      # not the docker-compose.yml-level dev mosquitto in ../gateway.
+      - MQTT_BROKER_URL=tcp://mqtt.nxge.co:1883
+      - MQTT_CLIENT_ID=internal-server
+      - MQTT_DATA_TOPIC_FILTER=gateway/+/data
+      - DATABASE_URL=postgres://internal_server:internal_server@postgres:5432/internal_server?sslmode=disable
+      - HTTP_ADDR=:9100
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=internal_server
+      - POSTGRES_PASSWORD=internal_server
+      - POSTGRES_DB=internal_server
+    volumes:
+      - internal-server-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U internal_server"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  internal-server-db:
