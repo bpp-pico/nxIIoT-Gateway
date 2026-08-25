@@ -50,17 +50,19 @@ export function LogsPage() {
         ) : (
           logs.map((entry, i) => (
             <div key={i} style={styles.logLine}>
-              <span style={styles.muted}>{new Date(entry.time).toLocaleTimeString()}</span>{' '}
-              <span style={{ color: levelColor[entry.level] ?? '#111', fontWeight: 700 }}>{entry.level}</span>{' '}
-              {entry.message}
-              {entry.attrs && Object.keys(entry.attrs).length > 0 && (
-                <span style={styles.muted}>
-                  {' '}
-                  {Object.entries(entry.attrs)
-                    .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-                    .join(' ')}
-                </span>
-              )}
+              <span style={styles.muted}>{new Date(entry.time).toLocaleTimeString()}</span>
+              <span style={{ color: levelColor[entry.level] ?? '#111', fontWeight: 700 }}>{entry.level}</span>
+              <span>
+                {entry.message}
+                {entry.attrs && Object.keys(entry.attrs).length > 0 && (
+                  <span style={styles.muted}>
+                    {' '}
+                    {Object.entries(entry.attrs)
+                      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                      .join(' ')}
+                  </span>
+                )}
+              </span>
             </div>
           ))
         )}

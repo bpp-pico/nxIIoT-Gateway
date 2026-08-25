@@ -42,7 +42,18 @@ export const styles = {
     height: '100%',
     background: danger ? '#c0392b' : '#111',
   }),
-  logLine: { fontFamily: 'ui-monospace, monospace', fontSize: '0.8rem', whiteSpace: 'pre-wrap', padding: '0.15rem 0', borderBottom: '1px solid #f2f2f2' } satisfies CSSProperties,
+  logLine: {
+    display: 'grid',
+    gridTemplateColumns: '5.5rem 3.5rem 1fr',
+    gap: '0.5rem',
+    alignItems: 'baseline',
+    fontFamily: 'ui-monospace, monospace',
+    fontSize: '0.8rem',
+    whiteSpace: 'pre-wrap',
+    padding: '0.15rem 0',
+    borderBottom: '1px solid #f2f2f2',
+    textAlign: 'left',
+  } satisfies CSSProperties,
   logPanel: { maxHeight: '70vh', overflowY: 'auto', border: '1px solid #eee', borderRadius: 8, padding: '0.5rem 0.75rem', marginTop: '0.5rem', background: '#fafafa' } satisfies CSSProperties,
 }
 
