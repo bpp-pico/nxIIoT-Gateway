@@ -1496,6 +1496,8 @@ Two things make the restart-on-save actually take effect in every deployment mod
 
 The MQTT password is never sent to the browser (`GET /api/config/settings` omits it, matching §18's export rule) and a blank password field on save leaves the stored password unchanged rather than clearing it.
 
+**Update from Raspberry Pi deployment (2026-08-25, Session 2)**: the restart-on-save path is now verified for real under `nxiiot-gateway.service`'s `Restart=always` (previously only exercised under Docker Compose's `restart: unless-stopped`) — `PUT /api/config/settings` returned `{"restarting":true,"saved":true}`, the process PID changed, and `systemctl status` showed a fresh `active (running)` within ~8 seconds, API responding again.
+
 ## 29.2 Host Network IP (`internal/netconfig`)
 
 The higher-risk half of the request: setting the gateway host's actual network interface IP (not a config field, not a container's virtual network — the real LAN-facing adapter), for the case where a Raspberry Pi needs a static IP set up from its own Web UI instead of SSH/console access.
@@ -1511,4 +1513,4 @@ Implementation — `internal/netconfig`:
 
 Tests: 10 tests across `netconfig_test.go` (real `nmcli -t` terse-format output parsing, using an injected fake command runner — no `nmcli` binary needed, matching this codebase's established injection pattern for external dependencies) and `service_test.go` (the confirm/revert timer logic against a fake `Controller`, including the "reverts to the prior static config, not DHCP" case). All pass on this Windows dev host, since nothing here requires Linux at compile time.
 
-**Explicitly not yet verified**: any of this against a real `nmcli`/NetworkManager instance or actual network hardware. That verification is deferred to Raspberry Pi deployment, per the user's own instruction — this section will need an update once that happens.
+**Update from Raspberry Pi deployment (2026-08-25, Sessions 1 and 2)**: `Controller.Current()` is now verified against a real `nmcli`/NetworkManager instance — `GET /api/system/network` on the Pi correctly reports `{"supported":true,"interface":"wlan0","method":"auto","address":"192.168.99.84",...}`, matching the real interface/IP/gateway/DNS. Re-confirmed identically on a second, freshly-flashed SD card in Session 2, so this isn't an artifact of one card's state. **Still not verified**: `ApplyStatic`/the confirm-or-auto-revert flow itself — the actual point of the `Service` wrapper — deliberately deferred until physical console access is arranged (per `DEPLOY_PLAN.md` §0), since a bad apply on the only network path in would strand the device.
