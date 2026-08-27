@@ -178,6 +178,7 @@ export function DevicesPage() {
                 <th style={styles.th}>Connection</th>
                 <th style={styles.th}>Slave ID</th>
                 <th style={styles.th}>Polling</th>
+                <th style={styles.th}>Poll Time</th>
                 <th style={styles.th}>Enabled</th>
                 <th style={styles.th}>Status</th>
                 <th style={styles.th}>Test</th>
@@ -198,6 +199,18 @@ export function DevicesPage() {
                   <td style={styles.td}>{connectionName(d.connection_id)}</td>
                   <td style={styles.td}>{d.slave_id}</td>
                   <td style={styles.td}>{d.polling_interval_ms} ms</td>
+                  <td style={styles.td}>
+                    {d.last_poll_duration_ms != null ? (
+                      <span
+                        title={`${d.datapoints_polled ?? 0} data point(s) read in the last poll cycle`}
+                        style={d.last_poll_duration_ms > d.polling_interval_ms ? { color: '#C0392B', fontWeight: 600 } : undefined}
+                      >
+                        {d.last_poll_duration_ms} ms ({d.datapoints_polled ?? 0} pts)
+                      </span>
+                    ) : (
+                      <span style={styles.muted}>—</span>
+                    )}
+                  </td>
                   <td style={styles.td}>
                     <input type="checkbox" style={styles.checkbox} checked={d.enabled} onChange={() => handleToggleDeviceEnabled(d)} />
                   </td>

@@ -37,13 +37,13 @@ type runningConnection struct {
 	devices []deviceWithPoints
 }
 
-func NewManager(ctx context.Context, log *slog.Logger, connRepo *connection.Repository, deviceRepo *device.Repository, datapointRepo *datapoint.Repository, onReading OnReading, diag *diagnostics.Store) *Manager {
+func NewManager(ctx context.Context, log *slog.Logger, connRepo *connection.Repository, deviceRepo *device.Repository, datapointRepo *datapoint.Repository, onReading OnReading, onPollCycle OnPollCycle, diag *diagnostics.Store) *Manager {
 	return &Manager{
 		log:           log,
 		connRepo:      connRepo,
 		deviceRepo:    deviceRepo,
 		datapointRepo: datapointRepo,
-		poller:        NewPoller(log, onReading, diag),
+		poller:        NewPoller(log, onReading, onPollCycle, diag),
 		parentCtx:     ctx,
 		running:       make(map[int64]*runningConnection),
 	}

@@ -21,6 +21,13 @@ import (
 // must return quickly; slow consumers should buffer internally.
 type OnReading func(Reading)
 
+// OnPollCycle is called once per device after its data points have been
+// polled for the current cycle (i.e. only on ticks where the device's own
+// polling_interval_ms gate lets it through), reporting how long that took —
+// for the Web UI's per-device polling-timing display, so intervals can be
+// tuned against real hardware response times instead of guessed.
+type OnPollCycle func(deviceID int64, durationMs int64, datapointsRead int, at time.Time)
+
 // deviceWithPoints pairs a device with its enabled data points, for polling
 // within one connection's shared goroutine.
 type deviceWithPoints struct {
@@ -29,15 +36,17 @@ type deviceWithPoints struct {
 }
 
 type Poller struct {
-	log       *slog.Logger
-	onReading OnReading
-	diag      *diagnostics.Store
+	log         *slog.Logger
+	onReading   OnReading
+	onPollCycle OnPollCycle
+	diag        *diagnostics.Store
 }
 
 // diag may be nil (e.g. in tests that don't care about diagnostics
 // counters) — every diag.RecordResult call below is guarded accordingly.
-func NewPoller(log *slog.Logger, onReading OnReading, diag *diagnostics.Store) *Poller {
-	return &Poller{log: log, onReading: onReading, diag: diag}
+// onPollCycle may also be nil (e.g. in tests) — every call below is guarded.
+func NewPoller(log *slog.Logger, onReading OnReading, onPollCycle OnPollCycle, diag *diagnostics.Store) *Poller {
+	return &Poller{log: log, onReading: onReading, onPollCycle: onPollCycle, diag: diag}
 }
 
 // runConnection owns exactly one Client for the lifetime of conn's polling
@@ -111,6 +120,8 @@ func (p *Poller) runConnectionWithClient(ctx context.Context, conn connection.Co
 			lastPolledDevice[dg.device.ID] = now
 			client.SetUnitID(byte(dg.device.SlaveID))
 
+			deviceStart := time.Now()
+			readCount := 0
 			for _, dp := range dg.dps {
 				dpInterval := time.Duration(dp.PollingIntervalMs) * time.Millisecond
 				if last, ok := lastPolledPoint[dp.ID]; ok && now.Sub(last) < dpInterval {
@@ -118,6 +129,10 @@ func (p *Poller) runConnectionWithClient(ctx context.Context, conn connection.Co
 				}
 				lastPolledPoint[dp.ID] = now
 				p.readOne(ctx, client, dg.device, dp, now)
+				readCount++
+			}
+			if readCount > 0 && p.onPollCycle != nil {
+				p.onPollCycle(dg.device.ID, time.Since(deviceStart).Milliseconds(), readCount, now)
 			}
 		}
 	}

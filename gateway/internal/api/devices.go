@@ -25,6 +25,13 @@ type deviceDTO struct {
 
 	Status   string `json:"status,omitempty"`
 	LastSeen string `json:"last_seen,omitempty"`
+
+	// LastPollDurationMs/DatapointsPolled reflect the most recent full poll
+	// cycle for this device (see acquisition.OnPollCycle) — for tuning
+	// polling_interval_ms against real hardware response times. Zero/absent
+	// until the device has completed at least one poll cycle.
+	LastPollDurationMs *int64 `json:"last_poll_duration_ms,omitempty"`
+	DatapointsPolled   int    `json:"datapoints_polled,omitempty"`
 }
 
 func (s *Server) toDeviceDTO(d device.Device) deviceDTO {
@@ -39,6 +46,10 @@ func (s *Server) toDeviceDTO(d device.Device) deviceDTO {
 	if info, ok := s.status.Get(d.ID); ok {
 		dto.Status = info.Quality
 		dto.LastSeen = info.LastSeen.Format("2006-01-02T15:04:05.000Z")
+		if info.DatapointsPolled > 0 {
+			dto.LastPollDurationMs = &info.LastPollDurationMs
+			dto.DatapointsPolled = info.DatapointsPolled
+		}
 	}
 	return dto
 }

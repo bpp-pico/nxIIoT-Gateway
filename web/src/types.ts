@@ -27,6 +27,8 @@ export interface Device {
   enabled: boolean
   status?: string
   last_seen?: string
+  last_poll_duration_ms?: number
+  datapoints_polled?: number
 }
 
 export interface DataPoint {
