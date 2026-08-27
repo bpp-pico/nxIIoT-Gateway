@@ -96,6 +96,7 @@ func NewRouter(cfg *config.Config, configPath string, db *sql.DB, log *slog.Logg
 
 		r.Get("/system/network", s.getNetworkStatus)
 		r.Post("/system/network", s.applyNetwork)
+		r.Post("/system/network/dhcp", s.applyNetworkDHCP)
 		r.Post("/system/network/confirm", s.confirmNetwork)
 	})
 

@@ -176,6 +176,10 @@ export interface ApplyNetworkRequest {
   dns?: string[]
 }
 
+export interface ApplyNetworkDHCPRequest {
+  interface: string
+}
+
 export interface ApplyNetworkResult {
   applied: boolean
   confirm_within_seconds: number

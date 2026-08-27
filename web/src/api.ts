@@ -1,4 +1,5 @@
 import type {
+  ApplyNetworkDHCPRequest,
   ApplyNetworkRequest,
   ApplyNetworkResult,
   ConfigExport,
@@ -74,5 +75,7 @@ export const api = {
   getNetworkStatus: () => request<NetworkStatus>('/api/system/network'),
   applyNetwork: (req: ApplyNetworkRequest) =>
     request<ApplyNetworkResult>('/api/system/network', { method: 'POST', body: JSON.stringify(req) }),
+  applyNetworkDHCP: (req: ApplyNetworkDHCPRequest) =>
+    request<ApplyNetworkResult>('/api/system/network/dhcp', { method: 'POST', body: JSON.stringify(req) }),
   confirmNetwork: () => request<{ confirmed: boolean }>('/api/system/network/confirm', { method: 'POST' }),
 }

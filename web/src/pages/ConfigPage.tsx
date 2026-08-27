@@ -216,6 +216,7 @@ function NetworkSection() {
   const [confirmDeadline, setConfirmDeadline] = useState<number | null>(null)
   const [now, setNow] = useState(Date.now())
   const [form, setForm] = useState({ interface: '', address: '', prefix: 24, gateway: '', dns: '' })
+  const [mode, setMode] = useState<'static' | 'dhcp'>('static')
 
   const load = () => {
     api
@@ -232,6 +233,9 @@ function NetworkSection() {
             gateway: s.gateway ?? '',
             dns: (s.dns ?? []).join(', '),
           })
+          // Default the mode tab to whatever the host is actually running,
+          // so switching to it doesn't look like a change you have to Apply.
+          setMode(s.method === 'auto' ? 'dhcp' : 'static')
         }
       })
       .catch((err) => setError(String(err instanceof Error ? err.message : err)))
@@ -277,6 +281,22 @@ function NetworkSection() {
         gateway: form.gateway,
         dns,
       })
+      setConfirmDeadline(Date.now() + result.confirm_within_seconds * 1000)
+      setNow(Date.now())
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err))
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const handleApplyDHCP = async () => {
+    if (!confirm(`Switch ${form.interface} to DHCP (automatic)? If this address becomes unreachable it will auto-revert.`))
+      return
+    setApplying(true)
+    setError(null)
+    try {
+      const result = await api.applyNetworkDHCP({ interface: form.interface })
       setConfirmDeadline(Date.now() + result.confirm_within_seconds * 1000)
       setNow(Date.now())
     } catch (err) {
@@ -358,37 +378,89 @@ function NetworkSection() {
             </div>
 
             <div style={styles.card}>
-              <div style={styles.cardTitle}>Set Static IP</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <div style={{ ...styles.cardTitle, marginBottom: 0 }}>Set Address</div>
+                <div style={{ display: 'flex', gap: 2, background: '#FAFAFF', padding: 3, borderRadius: 10, border: '1px solid #ECE9F7' }}>
+                  <button
+                    style={{
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      fontSize: '0.75rem',
+                      fontWeight: mode === 'static' ? 700 : 500,
+                      padding: '0.3rem 0.7rem',
+                      borderRadius: 7,
+                      background: mode === 'static' ? '#F3EFFE' : 'transparent',
+                      color: mode === 'static' ? '#8B5CF6' : '#6B6580',
+                    }}
+                    onClick={() => setMode('static')}
+                  >
+                    Static
+                  </button>
+                  <button
+                    style={{
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                      fontSize: '0.75rem',
+                      fontWeight: mode === 'dhcp' ? 700 : 500,
+                      padding: '0.3rem 0.7rem',
+                      borderRadius: 7,
+                      background: mode === 'dhcp' ? '#F3EFFE' : 'transparent',
+                      color: mode === 'dhcp' ? '#8B5CF6' : '#6B6580',
+                    }}
+                    onClick={() => setMode('dhcp')}
+                  >
+                    DHCP
+                  </button>
+                </div>
+              </div>
+
               <div style={styles.formRow}>
                 <label style={styles.label}>Interface</label>
                 <input style={styles.input} value={form.interface} onChange={(e) => setForm({ ...form, interface: e.target.value })} />
               </div>
-              <div style={styles.formRow}>
-                <label style={styles.label}>IP Address</label>
-                <input style={styles.input} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
-              </div>
-              <div style={styles.formRow}>
-                <label style={styles.label}>Prefix (CIDR)</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={32}
-                  style={styles.input}
-                  value={form.prefix}
-                  onChange={(e) => setForm({ ...form, prefix: Number(e.target.value) })}
-                />
-              </div>
-              <div style={styles.formRow}>
-                <label style={styles.label}>Gateway</label>
-                <input style={styles.input} value={form.gateway} onChange={(e) => setForm({ ...form, gateway: e.target.value })} />
-              </div>
-              <div style={styles.formRow}>
-                <label style={styles.label}>DNS (comma-separated)</label>
-                <input style={styles.input} value={form.dns} onChange={(e) => setForm({ ...form, dns: e.target.value })} />
-              </div>
-              <button style={styles.primaryButton} disabled={applying || confirmDeadline !== null} onClick={handleApply}>
-                {applying ? 'Applying…' : 'Apply'}
-              </button>
+
+              {mode === 'static' ? (
+                <>
+                  <div style={styles.formRow}>
+                    <label style={styles.label}>IP Address</label>
+                    <input style={styles.input} value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} />
+                  </div>
+                  <div style={styles.formRow}>
+                    <label style={styles.label}>Prefix (CIDR)</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={32}
+                      style={styles.input}
+                      value={form.prefix}
+                      onChange={(e) => setForm({ ...form, prefix: Number(e.target.value) })}
+                    />
+                  </div>
+                  <div style={styles.formRow}>
+                    <label style={styles.label}>Gateway</label>
+                    <input style={styles.input} value={form.gateway} onChange={(e) => setForm({ ...form, gateway: e.target.value })} />
+                  </div>
+                  <div style={styles.formRow}>
+                    <label style={styles.label}>DNS (comma-separated)</label>
+                    <input style={styles.input} value={form.dns} onChange={(e) => setForm({ ...form, dns: e.target.value })} />
+                  </div>
+                  <button style={styles.primaryButton} disabled={applying || confirmDeadline !== null} onClick={handleApply}>
+                    {applying ? 'Applying…' : 'Apply Static IP'}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <p style={styles.muted}>
+                    The interface will request an address automatically from DHCP. Protected by the same
+                    confirm-or-revert countdown as a static apply.
+                  </p>
+                  <button style={styles.primaryButton} disabled={applying || confirmDeadline !== null} onClick={handleApplyDHCP}>
+                    {applying ? 'Switching…' : 'Switch to DHCP'}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </>

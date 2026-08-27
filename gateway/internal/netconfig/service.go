@@ -38,12 +38,33 @@ func (s *Service) Current() (Info, error) {
 // captured just now — each Apply is its own checkpoint, not stacked on
 // the original pre-change state.
 func (s *Service) Apply(cfg StaticConfig, confirmWindow time.Duration) error {
+	return s.applyAndArm(confirmWindow, func() error { return s.ctrl.ApplyStatic(cfg) })
+}
+
+// ApplyDHCP switches iface to automatic (DHCP) addressing, protected by
+// the same confirm-or-revert safety net as Apply — if the device
+// becomes unreachable at its new DHCP-assigned address before Confirm
+// is called, it reverts back to whatever config (static or DHCP) was
+// active before this call, the same as an unconfirmed static Apply
+// would.
+func (s *Service) ApplyDHCP(iface string, confirmWindow time.Duration) error {
+	return s.applyAndArm(confirmWindow, func() error { return s.ctrl.ApplyDHCP(iface) })
+}
+
+// applyAndArm snapshots the current config, runs do (the actual
+// nmcli-backed change), and schedules an automatic revert to the
+// snapshot after confirmWindow unless Confirm is called first. Calling
+// Apply/ApplyDHCP again while a previous change is still unconfirmed
+// replaces the pending revert with a fresh one targeting the config
+// captured just now — each call is its own checkpoint, not stacked on
+// the original pre-change state.
+func (s *Service) applyAndArm(confirmWindow time.Duration, do func() error) error {
 	prev, err := s.ctrl.Current()
 	if err != nil {
 		return fmt.Errorf("read current network config: %w", err)
 	}
 
-	if err := s.ctrl.ApplyStatic(cfg); err != nil {
+	if err := do(); err != nil {
 		return err
 	}
 

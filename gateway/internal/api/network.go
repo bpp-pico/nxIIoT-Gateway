@@ -107,6 +107,42 @@ func (s *Server) applyNetwork(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type applyNetworkDHCPRequest struct {
+	Interface string `json:"interface"`
+}
+
+// applyNetworkDHCP is the DHCP counterpart of applyNetwork — switches
+// the interface to automatic addressing immediately, guarded by the
+// same confirm-or-revert timer (netconfig.Service.ApplyDHCP), since
+// losing a fixed address a device depends on is the same class of
+// lockout risk as a bad static apply.
+func (s *Server) applyNetworkDHCP(w http.ResponseWriter, r *http.Request) {
+	if s.netSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, netconfig.ErrUnsupported.Error())
+		return
+	}
+
+	var req applyNetworkDHCPRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+
+	if err := s.netSvc.ApplyDHCP(req.Interface, networkConfirmWindow); err != nil {
+		if errors.Is(err, netconfig.ErrUnsupported) {
+			writeError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"applied":                true,
+		"confirm_within_seconds": int(networkConfirmWindow.Seconds()),
+	})
+}
+
 func (s *Server) confirmNetwork(w http.ResponseWriter, r *http.Request) {
 	if s.netSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, netconfig.ErrUnsupported.Error())

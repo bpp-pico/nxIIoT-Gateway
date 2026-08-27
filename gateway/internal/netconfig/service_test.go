@@ -115,6 +115,70 @@ func TestServiceConfirmFailsWhenNothingPending(t *testing.T) {
 	}
 }
 
+func TestServiceApplyDHCPSwitchesImmediatelyAndArmsRevert(t *testing.T) {
+	ctrl := &fakeController{current: netconfig.Info{
+		Interface: "eth0", Method: "manual", Address: "192.168.1.10", Prefix: 24, Gateway: "192.168.1.1",
+	}}
+	svc := netconfig.NewService(ctrl, testLogger())
+
+	if err := svc.ApplyDHCP("eth0", 150*time.Millisecond); err != nil {
+		t.Fatalf("ApplyDHCP: %v", err)
+	}
+
+	got, _ := ctrl.Current()
+	if got.Method != "auto" {
+		t.Fatalf("expected DHCP applied immediately, got %+v", got)
+	}
+	if !svc.Pending() {
+		t.Fatal("expected a pending revert immediately after ApplyDHCP")
+	}
+}
+
+func TestServiceRevertsUnconfirmedDHCPChangeBackToPreviousStatic(t *testing.T) {
+	// Switching to DHCP carries the same lockout risk as a bad static
+	// apply (losing a fixed address the device depends on) — an
+	// unconfirmed switch must revert back to the prior static config.
+	ctrl := &fakeController{current: netconfig.Info{
+		Interface: "eth0", Method: "manual", Address: "192.168.1.10", Prefix: 24, Gateway: "192.168.1.1",
+	}}
+	svc := netconfig.NewService(ctrl, testLogger())
+
+	if err := svc.ApplyDHCP("eth0", 80*time.Millisecond); err != nil {
+		t.Fatalf("ApplyDHCP: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	got, _ := ctrl.Current()
+	if got.Method != "manual" || got.Address != "192.168.1.10" {
+		t.Fatalf("expected revert to the original static config 192.168.1.10, got %+v", got)
+	}
+	if svc.Pending() {
+		t.Fatal("expected no pending revert after it already fired")
+	}
+}
+
+func TestServiceKeepsDHCPWhenConfirmedInTime(t *testing.T) {
+	ctrl := &fakeController{current: netconfig.Info{
+		Interface: "eth0", Method: "manual", Address: "192.168.1.10", Prefix: 24, Gateway: "192.168.1.1",
+	}}
+	svc := netconfig.NewService(ctrl, testLogger())
+
+	if err := svc.ApplyDHCP("eth0", 150*time.Millisecond); err != nil {
+		t.Fatalf("ApplyDHCP: %v", err)
+	}
+	if err := svc.Confirm(); err != nil {
+		t.Fatalf("Confirm: %v", err)
+	}
+
+	time.Sleep(250 * time.Millisecond) // past the original confirm window
+
+	got, _ := ctrl.Current()
+	if got.Method != "auto" {
+		t.Fatalf("expected the confirmed DHCP switch to survive, got %+v", got)
+	}
+}
+
 func TestServiceRevertsToPreviousStaticConfigNotJustDHCP(t *testing.T) {
 	// Starting from an existing static config (not DHCP), an unconfirmed
 	// change must revert back to that exact prior static config — not
