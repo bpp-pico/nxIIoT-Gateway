@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"nxiiot-gateway/internal/config"
@@ -35,6 +37,30 @@ type settingsDTO struct {
 		Timezone        string `json:"timezone"`
 		SyncIntervalSec int    `json:"sync_interval_seconds"`
 	} `json:"time"`
+}
+
+// normalizeNTPServer strips a leading /etc/ntp.conf-style "server "/"pool "
+// token (a common paste mistake — the Web UI field wants a bare
+// hostname/IP, not a config-file line) and rejects anything that still
+// contains whitespace afterward, since that can never resolve as a
+// hostname and would otherwise fail silently at DNS-lookup time with no
+// error surfaced anywhere in the UI (see MEMORY.md's 2026-08-27 entry).
+// An empty string is valid and disables NTP sync.
+func normalizeNTPServer(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return "", nil
+	}
+	for _, prefix := range []string{"server ", "pool "} {
+		if strings.HasPrefix(strings.ToLower(s), prefix) {
+			s = strings.TrimSpace(s[len(prefix):])
+			break
+		}
+	}
+	if strings.ContainsAny(s, " \t\r\n") {
+		return "", fmt.Errorf("ntp_server must be a bare hostname or IP address, not an ntp.conf-style line (got %q)", raw)
+	}
+	return s, nil
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
@@ -99,7 +125,12 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	if dto.MQTT.KeepAliveSec > 0 {
 		s.cfg.MQTT.KeepAliveSec = dto.MQTT.KeepAliveSec
 	}
-	s.cfg.Time.NTPServer = dto.Time.NTPServer
+	ntpServer, err := normalizeNTPServer(dto.Time.NTPServer)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	s.cfg.Time.NTPServer = ntpServer
 	s.cfg.Time.Timezone = dto.Time.Timezone
 	if dto.Time.SyncIntervalSec > 0 {
 		s.cfg.Time.SyncIntervalSec = dto.Time.SyncIntervalSec
