@@ -8,10 +8,11 @@ import (
 	goburrow "github.com/goburrow/modbus"
 )
 
-// TCPConfig configures a Modbus TCP client connection (FR-002).
+// TCPConfig configures a Modbus TCP client connection (FR-002). There is
+// deliberately no unit ID here — see RTUConfig's doc comment; use
+// Client.SetUnitID before each device's reads instead.
 type TCPConfig struct {
 	Address string // host:port, e.g. "10.0.0.5:502"
-	UnitID  byte
 	Timeout time.Duration
 }
 
@@ -24,7 +25,6 @@ type tcpClient struct {
 // before the first Read.
 func NewTCPClient(cfg TCPConfig) Client {
 	handler := goburrow.NewTCPClientHandler(cfg.Address)
-	handler.SlaveId = cfg.UnitID
 	handler.Timeout = cfg.Timeout
 
 	return &tcpClient{
@@ -39,6 +39,10 @@ func (t *tcpClient) Connect() error {
 
 func (t *tcpClient) Close() error {
 	return t.handler.Close()
+}
+
+func (t *tcpClient) SetUnitID(id byte) {
+	t.handler.SlaveId = id
 }
 
 func (t *tcpClient) Read(ctx context.Context, fc FunctionCode, address, quantity uint16) ([]byte, error) {

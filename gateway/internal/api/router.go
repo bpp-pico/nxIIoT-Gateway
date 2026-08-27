@@ -12,6 +12,7 @@ import (
 
 	"nxiiot-gateway/internal/acquisition"
 	"nxiiot-gateway/internal/config"
+	"nxiiot-gateway/internal/connection"
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
 	"nxiiot-gateway/internal/diagnostics"
@@ -29,6 +30,7 @@ type Server struct {
 	configPath    string
 	db            *sql.DB
 	log           *slog.Logger
+	connRepo      *connection.Repository
 	deviceRepo    *device.Repository
 	datapointRepo *datapoint.Repository
 	status        *status.Store
@@ -47,6 +49,7 @@ func NewRouter(cfg *config.Config, configPath string, db *sql.DB, log *slog.Logg
 		configPath:    configPath,
 		db:            db,
 		log:           log,
+		connRepo:      connection.NewRepository(db),
 		deviceRepo:    device.NewRepository(db),
 		datapointRepo: datapoint.NewRepository(db),
 		status:        statusStore,
@@ -67,6 +70,11 @@ func NewRouter(cfg *config.Config, configPath string, db *sql.DB, log *slog.Logg
 		r.Get("/system", s.getSystem)
 		r.Get("/system/serial-ports", s.getSerialPorts)
 		r.Get("/time", s.getTime)
+
+		r.Get("/connections", s.listConnections)
+		r.Post("/connections", s.createConnection)
+		r.Put("/connections/{id}", s.updateConnection)
+		r.Delete("/connections/{id}", s.deleteConnection)
 
 		r.Get("/devices", s.listDevices)
 		r.Post("/devices", s.createDevice)

@@ -1,25 +1,30 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import type { Device } from '../types'
+import type { Connection, Device } from '../types'
 import { styles, qualityBadgeStyle } from '../styles'
 import { Icon } from '../icons'
 import { Modal } from '../components/Modal'
+import { ConnectionForm } from '../components/ConnectionForm'
 import { DeviceForm } from '../components/DeviceForm'
 import { DataPointsPanel } from '../components/DataPointsPanel'
 
 export function DevicesPage() {
+  const [connections, setConnections] = useState<Connection[]>([])
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [editing, setEditing] = useState<Device | 'new' | null>(null)
+  const [editingConnection, setEditingConnection] = useState<Connection | 'new' | null>(null)
+  const [editingDevice, setEditingDevice] = useState<Device | 'new' | null>(null)
   const [selectedDeviceId, setSelectedDeviceId] = useState<number | null>(null)
   const [testResults, setTestResults] = useState<Record<number, string>>({})
 
   const load = () => {
     setLoading(true)
-    api
-      .listDevices()
-      .then(setDevices)
+    Promise.all([api.listConnections(), api.listDevices()])
+      .then(([conns, devs]) => {
+        setConnections(conns)
+        setDevices(devs)
+      })
       .catch((err) => setError(String(err.message ?? err)))
       .finally(() => setLoading(false))
   }
@@ -30,24 +35,51 @@ export function DevicesPage() {
     return () => clearInterval(interval)
   }, [])
 
-  const handleSave = async (device: Partial<Device>) => {
-    if (editing === 'new') {
-      await api.createDevice(device)
-    } else if (editing) {
-      await api.updateDevice(editing.id, device)
+  const connectionName = (id: number) => connections.find((c) => c.id === id)?.name ?? `#${id}`
+
+  const handleSaveConnection = async (connection: Partial<Connection>) => {
+    if (editingConnection === 'new') {
+      await api.createConnection(connection)
+    } else if (editingConnection) {
+      await api.updateConnection(editingConnection.id, connection)
     }
-    setEditing(null)
+    setEditingConnection(null)
     load()
   }
 
-  const handleDelete = async (device: Device) => {
+  const handleDeleteConnection = async (connection: Connection) => {
+    if (!confirm(`Delete connection "${connection.name}"? This is blocked while any device still uses it.`)) return
+    try {
+      await api.deleteConnection(connection.id)
+      load()
+    } catch (err) {
+      setError(String(err instanceof Error ? err.message : err))
+    }
+  }
+
+  const handleToggleConnectionEnabled = async (connection: Connection) => {
+    await api.updateConnection(connection.id, { ...connection, enabled: !connection.enabled })
+    load()
+  }
+
+  const handleSaveDevice = async (device: Partial<Device>) => {
+    if (editingDevice === 'new') {
+      await api.createDevice(device)
+    } else if (editingDevice) {
+      await api.updateDevice(editingDevice.id, device)
+    }
+    setEditingDevice(null)
+    load()
+  }
+
+  const handleDeleteDevice = async (device: Device) => {
     if (!confirm(`Delete device "${device.name}" and all its data points?`)) return
     await api.deleteDevice(device.id)
     if (selectedDeviceId === device.id) setSelectedDeviceId(null)
     load()
   }
 
-  const handleToggleEnabled = async (device: Device) => {
+  const handleToggleDeviceEnabled = async (device: Device) => {
     await api.updateDevice(device.id, { ...device, enabled: !device.enabled })
     load()
   }
@@ -69,15 +101,70 @@ export function DevicesPage() {
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2>Connections</h2>
+        <button style={{ ...styles.primaryButton, display: 'inline-flex', alignItems: 'center', gap: 8 }} onClick={() => setEditingConnection('new')}>
+          <Icon name="plus" size={16} color="#fff" />
+          Add Connection
+        </button>
+      </div>
+
+      {error && <div style={styles.errorBox}>{error}</div>}
+
+      {loading && connections.length === 0 ? (
+        <p style={styles.muted}>Loading…</p>
+      ) : connections.length === 0 ? (
+        <p style={styles.muted}>No connections configured yet — add one before adding devices.</p>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid #ECE9F7', borderRadius: 20, padding: 8, marginBottom: '1.5rem' }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Name</th>
+                <th style={styles.th}>Protocol</th>
+                <th style={styles.th}>Address</th>
+                <th style={styles.th}>Enabled</th>
+                <th style={styles.th}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {connections.map((c) => (
+                <tr key={c.id}>
+                  <td style={styles.td}>{c.name}</td>
+                  <td style={styles.td}>{c.protocol}</td>
+                  <td style={styles.td}>{c.protocol === 'TCP' ? `${c.ip_address}:${c.port}` : c.interface}</td>
+                  <td style={styles.td}>
+                    <input type="checkbox" style={styles.checkbox} checked={c.enabled} onChange={() => handleToggleConnectionEnabled(c)} />
+                  </td>
+                  <td style={styles.td}>
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                      <button style={styles.smallButton} onClick={() => setEditingConnection(c)}>
+                        Edit
+                      </button>
+                      <button style={styles.dangerButton} onClick={() => handleDeleteConnection(c)}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
         <h2>Devices</h2>
-        <button style={{ ...styles.primaryButton, display: 'inline-flex', alignItems: 'center', gap: 8 }} onClick={() => setEditing('new')}>
+        <button
+          style={{ ...styles.primaryButton, display: 'inline-flex', alignItems: 'center', gap: 8 }}
+          onClick={() => setEditingDevice('new')}
+          disabled={connections.length === 0}
+        >
           <Icon name="plus" size={16} color="#fff" />
           Add Device
         </button>
       </div>
 
-      {error && <div style={styles.errorBox}>{error}</div>}
       {loading && devices.length === 0 ? (
         <p style={styles.muted}>Loading…</p>
       ) : devices.length === 0 ? (
@@ -88,8 +175,8 @@ export function DevicesPage() {
             <thead>
               <tr>
                 <th style={styles.th}>Name</th>
-                <th style={styles.th}>Protocol</th>
-                <th style={styles.th}>Address</th>
+                <th style={styles.th}>Connection</th>
+                <th style={styles.th}>Slave ID</th>
                 <th style={styles.th}>Polling</th>
                 <th style={styles.th}>Enabled</th>
                 <th style={styles.th}>Status</th>
@@ -108,11 +195,11 @@ export function DevicesPage() {
                       {d.name}
                     </button>
                   </td>
-                  <td style={styles.td}>{d.protocol}</td>
-                  <td style={styles.td}>{d.protocol === 'TCP' ? `${d.ip_address}:${d.port}` : d.interface}</td>
+                  <td style={styles.td}>{connectionName(d.connection_id)}</td>
+                  <td style={styles.td}>{d.slave_id}</td>
                   <td style={styles.td}>{d.polling_interval_ms} ms</td>
                   <td style={styles.td}>
-                    <input type="checkbox" style={styles.checkbox} checked={d.enabled} onChange={() => handleToggleEnabled(d)} />
+                    <input type="checkbox" style={styles.checkbox} checked={d.enabled} onChange={() => handleToggleDeviceEnabled(d)} />
                   </td>
                   <td style={styles.td}>
                     {d.status ? (
@@ -132,10 +219,10 @@ export function DevicesPage() {
                   </td>
                   <td style={styles.td}>
                     <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
-                      <button style={styles.smallButton} onClick={() => setEditing(d)}>
+                      <button style={styles.smallButton} onClick={() => setEditingDevice(d)}>
                         Edit
                       </button>
-                      <button style={styles.dangerButton} onClick={() => handleDelete(d)}>
+                      <button style={styles.dangerButton} onClick={() => handleDeleteDevice(d)}>
                         Delete
                       </button>
                     </div>
@@ -149,9 +236,24 @@ export function DevicesPage() {
 
       {selectedDevice && <DataPointsPanel device={selectedDevice} onClose={() => setSelectedDeviceId(null)} />}
 
-      {editing && (
-        <Modal title={editing === 'new' ? 'Add Device' : `Edit ${editing.name}`} onClose={() => setEditing(null)}>
-          <DeviceForm initial={editing === 'new' ? undefined : editing} onSubmit={handleSave} onCancel={() => setEditing(null)} />
+      {editingConnection && (
+        <Modal title={editingConnection === 'new' ? 'Add Connection' : `Edit ${editingConnection.name}`} onClose={() => setEditingConnection(null)}>
+          <ConnectionForm
+            initial={editingConnection === 'new' ? undefined : editingConnection}
+            onSubmit={handleSaveConnection}
+            onCancel={() => setEditingConnection(null)}
+          />
+        </Modal>
+      )}
+
+      {editingDevice && (
+        <Modal title={editingDevice === 'new' ? 'Add Device' : `Edit ${editingDevice.name}`} onClose={() => setEditingDevice(null)}>
+          <DeviceForm
+            initial={editingDevice === 'new' ? undefined : editingDevice}
+            connections={connections}
+            onSubmit={handleSaveDevice}
+            onCancel={() => setEditingDevice(null)}
+          />
         </Modal>
       )}
     </div>

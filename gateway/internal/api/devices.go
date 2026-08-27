@@ -12,21 +12,15 @@ import (
 )
 
 // deviceDTO is the wire representation of a Device, per §5 Device Model.
+// Connection-level fields (protocol, interface, baud rate, etc.) live on
+// connectionDTO now — a device only names its connection_id, slave id,
+// polling interval, and enabled flag.
 type deviceDTO struct {
 	ID                int64  `json:"id"`
 	Name              string `json:"name"`
-	Protocol          string `json:"protocol"`
-	Interface         string `json:"interface,omitempty"`
-	BaudRate          int    `json:"baud_rate,omitempty"`
-	DataBits          int    `json:"data_bits,omitempty"`
-	Parity            string `json:"parity,omitempty"`
-	StopBits          int    `json:"stop_bits,omitempty"`
-	IPAddress         string `json:"ip_address,omitempty"`
-	Port              int    `json:"port,omitempty"`
+	ConnectionID      int64  `json:"connection_id"`
 	SlaveID           int    `json:"slave_id"`
 	PollingIntervalMs int    `json:"polling_interval_ms"`
-	TimeoutMs         int    `json:"timeout_ms"`
-	Retry             int    `json:"retry"`
 	Enabled           bool   `json:"enabled"`
 
 	Status   string `json:"status,omitempty"`
@@ -37,18 +31,9 @@ func (s *Server) toDeviceDTO(d device.Device) deviceDTO {
 	dto := deviceDTO{
 		ID:                d.ID,
 		Name:              d.Name,
-		Protocol:          string(d.Protocol),
-		Interface:         d.Interface,
-		BaudRate:          d.BaudRate,
-		DataBits:          d.DataBits,
-		Parity:            d.Parity,
-		StopBits:          d.StopBits,
-		IPAddress:         d.IPAddress,
-		Port:              d.Port,
+		ConnectionID:      d.ConnectionID,
 		SlaveID:           d.SlaveID,
 		PollingIntervalMs: d.PollingIntervalMs,
-		TimeoutMs:         d.TimeoutMs,
-		Retry:             d.Retry,
 		Enabled:           d.Enabled,
 	}
 	if info, ok := s.status.Get(d.ID); ok {
@@ -62,18 +47,9 @@ func (dto deviceDTO) toDevice() device.Device {
 	return device.Device{
 		ID:                dto.ID,
 		Name:              dto.Name,
-		Protocol:          device.Protocol(dto.Protocol),
-		Interface:         dto.Interface,
-		BaudRate:          dto.BaudRate,
-		DataBits:          dto.DataBits,
-		Parity:            dto.Parity,
-		StopBits:          dto.StopBits,
-		IPAddress:         dto.IPAddress,
-		Port:              dto.Port,
+		ConnectionID:      dto.ConnectionID,
 		SlaveID:           dto.SlaveID,
 		PollingIntervalMs: dto.PollingIntervalMs,
-		TimeoutMs:         dto.TimeoutMs,
-		Retry:             dto.Retry,
 		Enabled:           dto.Enabled,
 	}
 }

@@ -30,11 +30,18 @@ func (s *Server) testDeviceConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client, err := acquisition.BuildClient(d)
+	conn, err := s.connRepo.Get(r.Context(), d.ConnectionID)
+	if err != nil {
+		writeConnectionRepoError(w, err)
+		return
+	}
+
+	client, err := acquisition.BuildClient(conn)
 	if err != nil {
 		writeJSON(w, http.StatusOK, testConnectionResult{Quality: string(modbus.Invalid), Error: err.Error()})
 		return
 	}
+	client.SetUnitID(byte(d.SlaveID))
 
 	connErr := client.Connect()
 	_ = client.Close()
@@ -76,15 +83,22 @@ func (s *Server) testDataPointRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	conn, err := s.connRepo.Get(r.Context(), d.ConnectionID)
+	if err != nil {
+		writeConnectionRepoError(w, err)
+		return
+	}
+
 	result := testReadResult{Tag: dp.TagName, Unit: dp.Unit}
 
-	client, err := acquisition.BuildClient(d)
+	client, err := acquisition.BuildClient(conn)
 	if err != nil {
 		result.Quality = string(modbus.Invalid)
 		result.Error = err.Error()
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
+	client.SetUnitID(byte(d.SlaveID))
 
 	if err := client.Connect(); err != nil {
 		result.Quality = string(modbus.QualityFromError(err))
@@ -103,10 +117,10 @@ func (s *Server) testDataPointRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(d.TimeoutMs)*time.Millisecond)
+	ctx, cancel := context.WithTimeout(r.Context(), time.Duration(conn.TimeoutMs)*time.Millisecond)
 	defer cancel()
 
-	raw, _, err := modbus.ReadWithRetry(ctx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, d.Retry)
+	raw, _, err := modbus.ReadWithRetry(ctx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, conn.Retry)
 	if err != nil {
 		result.Quality = string(modbus.QualityFromError(err))
 		result.Error = err.Error()

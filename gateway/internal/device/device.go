@@ -1,4 +1,9 @@
 // Package device provides the Device configuration model and repository.
+// A Device is a slave ID and its data points on a shared connection.Connection
+// (see internal/connection) — the physical link (protocol, interface/baud/
+// timeout/etc) lives on Connection, not here, specifically so several
+// devices can share one physical bus (real Modbus RTU multi-drop) funneled
+// through one client instead of each opening its own competing connection.
 package device
 
 import (
@@ -8,72 +13,32 @@ import (
 	"fmt"
 )
 
-type Protocol string
-
-const (
-	RTU Protocol = "RTU"
-	TCP Protocol = "TCP"
-)
-
 var ErrNotFound = errors.New("device not found")
 
 type Device struct {
 	ID                int64
 	Name              string
-	Protocol          Protocol
-	Interface         string
-	IPAddress         string
+	ConnectionID      int64
 	SlaveID           int
-	Port              int
 	PollingIntervalMs int
-	TimeoutMs         int
-	Retry             int
 	Enabled           bool
-
-	// RTU-only (FR-001)
-	BaudRate int
-	DataBits int
-	Parity   string
-	StopBits int
 }
 
-// Validate checks the fields required by FR-001 (RTU) / FR-002 (TCP).
+// Validate checks the fields that are still device-level after the
+// connection split — connection-level checks (protocol/interface/baud/etc)
+// now live in connection.Connection.Validate.
 func (d Device) Validate() error {
 	if d.Name == "" {
 		return fmt.Errorf("name is required")
 	}
-	switch d.Protocol {
-	case TCP:
-		if d.IPAddress == "" {
-			return fmt.Errorf("ip_address is required for TCP devices")
-		}
-		if d.Port <= 0 || d.Port > 65535 {
-			return fmt.Errorf("port must be between 1 and 65535")
-		}
-	case RTU:
-		if d.Interface == "" {
-			return fmt.Errorf("interface is required for RTU devices")
-		}
-		if d.BaudRate <= 0 {
-			return fmt.Errorf("baud_rate must be positive")
-		}
-		if d.Parity != "N" && d.Parity != "E" && d.Parity != "O" {
-			return fmt.Errorf("parity must be one of N, E, O")
-		}
-	default:
-		return fmt.Errorf("protocol must be RTU or TCP")
+	if d.ConnectionID <= 0 {
+		return fmt.Errorf("connection_id is required")
 	}
 	if d.SlaveID < 1 || d.SlaveID > 247 {
 		return fmt.Errorf("slave_id must be between 1 and 247")
 	}
 	if d.PollingIntervalMs <= 0 {
 		return fmt.Errorf("polling_interval_ms must be positive")
-	}
-	if d.TimeoutMs <= 0 {
-		return fmt.Errorf("timeout_ms must be positive")
-	}
-	if d.Retry < 0 {
-		return fmt.Errorf("retry must not be negative")
 	}
 	return nil
 }
@@ -86,25 +51,17 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-const selectColumns = `id, name, protocol, interface, ip_address, slave_id, port,
-	polling_interval_ms, timeout_ms, retry, enabled,
-	baud_rate, data_bits, parity, stop_bits`
+const selectColumns = `id, name, connection_id, slave_id, polling_interval_ms, enabled`
 
 func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var d Device
-	var iface, ip sql.NullString
-	var slaveID, port sql.NullInt64
+	var slaveID sql.NullInt64
 	var enabled int
-	err := row.Scan(&d.ID, &d.Name, &d.Protocol, &iface, &ip, &slaveID, &port,
-		&d.PollingIntervalMs, &d.TimeoutMs, &d.Retry, &enabled,
-		&d.BaudRate, &d.DataBits, &d.Parity, &d.StopBits)
+	err := row.Scan(&d.ID, &d.Name, &d.ConnectionID, &slaveID, &d.PollingIntervalMs, &enabled)
 	if err != nil {
 		return Device{}, err
 	}
-	d.Interface = iface.String
-	d.IPAddress = ip.String
 	d.SlaveID = int(slaveID.Int64)
-	d.Port = int(port.Int64)
 	d.Enabled = enabled != 0
 	return d, nil
 }
@@ -114,7 +71,12 @@ func (r *Repository) List(ctx context.Context) ([]Device, error) {
 	return r.query(ctx, `SELECT `+selectColumns+` FROM device ORDER BY id`)
 }
 
-// ListEnabled returns all devices with enabled = 1.
+// ListEnabled returns all devices with enabled = 1, regardless of whether
+// their connection is also enabled — callers that care about the
+// connection's own enabled flag too (acquisition.Manager) join against
+// connection themselves; this method mirrors the pre-split behavior for
+// callers (like the dashboard's device count) that only care about the
+// device's own flag.
 func (r *Repository) ListEnabled(ctx context.Context) ([]Device, error) {
 	return r.query(ctx, `SELECT `+selectColumns+` FROM device WHERE enabled = 1 ORDER BY id`)
 }
@@ -162,13 +124,9 @@ func (r *Repository) Get(ctx context.Context, id int64) (Device, error) {
 // Create inserts a new device and returns its id.
 func (r *Repository) Create(ctx context.Context, d Device) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO device (name, protocol, interface, ip_address, slave_id, port,
-		                     polling_interval_ms, timeout_ms, retry, enabled,
-		                     baud_rate, data_bits, parity, stop_bits)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		d.Name, d.Protocol, nullable(d.Interface), nullable(d.IPAddress), d.SlaveID, d.Port,
-		d.PollingIntervalMs, d.TimeoutMs, d.Retry, boolToInt(d.Enabled),
-		d.BaudRate, d.DataBits, d.Parity, d.StopBits)
+		INSERT INTO device (name, connection_id, slave_id, polling_interval_ms, enabled)
+		VALUES (?, ?, ?, ?, ?)`,
+		d.Name, d.ConnectionID, d.SlaveID, d.PollingIntervalMs, boolToInt(d.Enabled))
 	if err != nil {
 		return 0, err
 	}
@@ -179,14 +137,10 @@ func (r *Repository) Create(ctx context.Context, d Device) (int64, error) {
 func (r *Repository) Update(ctx context.Context, id int64, d Device) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE device SET
-			name = ?, protocol = ?, interface = ?, ip_address = ?, slave_id = ?, port = ?,
-			polling_interval_ms = ?, timeout_ms = ?, retry = ?, enabled = ?,
-			baud_rate = ?, data_bits = ?, parity = ?, stop_bits = ?,
+			name = ?, connection_id = ?, slave_id = ?, polling_interval_ms = ?, enabled = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE id = ?`,
-		d.Name, d.Protocol, nullable(d.Interface), nullable(d.IPAddress), d.SlaveID, d.Port,
-		d.PollingIntervalMs, d.TimeoutMs, d.Retry, boolToInt(d.Enabled),
-		d.BaudRate, d.DataBits, d.Parity, d.StopBits, id)
+		d.Name, d.ConnectionID, d.SlaveID, d.PollingIntervalMs, boolToInt(d.Enabled), id)
 	if err != nil {
 		return err
 	}
@@ -211,13 +165,6 @@ func checkRowsAffected(res sql.Result) error {
 		return ErrNotFound
 	}
 	return nil
-}
-
-func nullable(s string) any {
-	if s == "" {
-		return nil
-	}
-	return s
 }
 
 func boolToInt(b bool) int {

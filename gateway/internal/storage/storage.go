@@ -71,6 +71,22 @@ func migrate(db *sql.DB, migrationsDir string, log *slog.Logger) error {
 			return fmt.Errorf("read migration %s: %w", name, err)
 		}
 
+		// PRAGMA foreign_keys is a no-op inside a transaction, so it must
+		// be toggled here, before tx.Begin() — this is SQLite's own
+		// documented procedure for a table rebuild (CREATE new shape,
+		// copy, DROP old, RENAME), which a migration may need to do to
+		// change a column a CHECK constraint depends on (DROP COLUMN
+		// alone can't). Without this, DROP TABLE on a table that's an FK
+		// parent triggers any ON DELETE CASCADE on its children as if
+		// every row were individually deleted — confirmed the hard way:
+		// 0004_connection_split.sql's DROP TABLE device silently wiped
+		// every datapoint row (device is datapoint's FK parent) until
+		// this fix, caught only because the migration was tested against
+		// seeded data, not an empty schema. See MEMORY.md.
+		if _, err := db.Exec(`PRAGMA foreign_keys = OFF`); err != nil {
+			return fmt.Errorf("disable foreign_keys for migration %s: %w", name, err)
+		}
+
 		tx, err := db.Begin()
 		if err != nil {
 			return fmt.Errorf("begin tx for %s: %w", name, err)
@@ -87,8 +103,30 @@ func migrate(db *sql.DB, migrationsDir string, log *slog.Logger) error {
 			return fmt.Errorf("commit migration %s: %w", name, err)
 		}
 
+		if _, err := db.Exec(`PRAGMA foreign_keys = ON`); err != nil {
+			return fmt.Errorf("re-enable foreign_keys after migration %s: %w", name, err)
+		}
+		// Belt-and-suspenders: relaxing FK enforcement during the
+		// migration could in principle let a bad migration commit a
+		// dangling reference. Verify none exists before trusting the
+		// result, same check the test suite runs.
+		if violation, err := hasForeignKeyViolation(db); err != nil {
+			return fmt.Errorf("check foreign keys after migration %s: %w", name, err)
+		} else if violation {
+			return fmt.Errorf("migration %s introduced a foreign key violation", name)
+		}
+
 		log.Info("applied migration", "file", name)
 	}
 
 	return nil
+}
+
+func hasForeignKeyViolation(db *sql.DB) (bool, error) {
+	rows, err := db.Query(`PRAGMA foreign_key_check`)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	return rows.Next(), rows.Err()
 }

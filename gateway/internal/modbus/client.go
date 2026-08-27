@@ -26,6 +26,18 @@ type Client interface {
 	// Close releases the underlying transport connection.
 	Close() error
 
+	// SetUnitID changes which slave/unit ID subsequent Read calls address,
+	// without touching the underlying transport connection. This is what
+	// lets several logical devices on one physical connection.Connection
+	// (real Modbus RTU multi-drop, or several TCP unit IDs behind one
+	// gateway) share a single Client: the acquisition Poller owns one
+	// Client per connection and calls SetUnitID before each device's own
+	// batch of reads (see internal/acquisition/poller.go's runConnection).
+	// Not safe to call concurrently with Read/Connect/Close from another
+	// goroutine — callers must serialize access to one Client themselves,
+	// which runConnection does by construction (one goroutine per Client).
+	SetUnitID(id byte)
+
 	// Read performs a single Modbus read request and returns the raw
 	// register/coil bytes as returned on the wire.
 	Read(ctx context.Context, fc FunctionCode, address, quantity uint16) ([]byte, error)

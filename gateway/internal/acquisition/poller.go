@@ -8,9 +8,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"time"
 
+	"nxiiot-gateway/internal/connection"
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
 	"nxiiot-gateway/internal/diagnostics"
@@ -20,6 +20,13 @@ import (
 // OnReading is called for every acquired (or failed) Data Point read. It
 // must return quickly; slow consumers should buffer internally.
 type OnReading func(Reading)
+
+// deviceWithPoints pairs a device with its enabled data points, for polling
+// within one connection's shared goroutine.
+type deviceWithPoints struct {
+	device device.Device
+	dps    []datapoint.DataPoint
+}
 
 type Poller struct {
 	log       *slog.Logger
@@ -33,32 +40,43 @@ func NewPoller(log *slog.Logger, onReading OnReading, diag *diagnostics.Store) *
 	return &Poller{log: log, onReading: onReading, diag: diag}
 }
 
-// Run polls every device concurrently until ctx is cancelled, blocking
-// until all device pollers have stopped.
-func (p *Poller) Run(ctx context.Context, devices []device.Device, dataPoints map[int64][]datapoint.DataPoint) {
-	var wg sync.WaitGroup
-	for _, d := range devices {
-		dps := dataPoints[d.ID]
-		if len(dps) == 0 {
-			continue
-		}
-		wg.Add(1)
-		go func(d device.Device, dps []datapoint.DataPoint) {
-			defer wg.Done()
-			p.runDevice(ctx, d, dps)
-		}(d, dps)
-	}
-	wg.Wait()
-}
-
-func (p *Poller) runDevice(ctx context.Context, d device.Device, dps []datapoint.DataPoint) {
-	client, err := BuildClient(d)
+// runConnection owns exactly one Client for the lifetime of conn's polling
+// — one goroutine per physical connection (not per device) is what makes
+// sharing that Client across several devices at different slave IDs safe:
+// nothing else ever touches it concurrently. This is the fix for a real
+// live incident (see MEMORY.md, gateway/migrations/0004_connection_split.sql):
+// before the connection/device split, two devices sharing one RTU interface
+// each opened their own independent connection, and their Modbus frames
+// corrupted each other on the wire.
+func (p *Poller) runConnection(ctx context.Context, conn connection.Connection, devices []deviceWithPoints) {
+	client, err := BuildClient(conn)
 	if err != nil {
-		p.log.Error("invalid device configuration", "device", d.Name, "error", err)
+		p.log.Error("invalid connection configuration", "connection", conn.Name, "error", err)
 		return
 	}
+	p.runConnectionWithClient(ctx, conn, devices, client)
+}
 
-	interval := time.Duration(d.PollingIntervalMs) * time.Millisecond
+// runConnectionWithClient is runConnection's body, taking an already-built
+// Client so tests can substitute a fake instead of a real serial/TCP handle.
+func (p *Poller) runConnectionWithClient(ctx context.Context, conn connection.Connection, devices []deviceWithPoints, client modbus.Client) {
+	// Tick at least as often as the fastest device on this connection
+	// needs — the per-device gate below still limits each device to its
+	// own configured interval, so a device sharing a connection with a
+	// faster sibling doesn't get polled any faster than it asked for, it
+	// just gets *checked* more often (cheap; matches the pre-existing
+	// per-datapoint gating pattern this generalizes, see MEMORY.md's note
+	// on polling_interval_ms existing at two levels).
+	interval := time.Duration(0)
+	for _, dg := range devices {
+		di := time.Duration(dg.device.PollingIntervalMs) * time.Millisecond
+		if di <= 0 {
+			di = time.Second
+		}
+		if interval == 0 || di < interval {
+			interval = di
+		}
+	}
 	if interval <= 0 {
 		interval = time.Second
 	}
@@ -66,26 +84,41 @@ func (p *Poller) runDevice(ctx context.Context, d device.Device, dps []datapoint
 	defer ticker.Stop()
 
 	connected := false
-	lastPolled := make(map[int64]time.Time, len(dps))
+	lastPolledDevice := make(map[int64]time.Time, len(devices))
+	lastPolledPoint := make(map[int64]time.Time)
 
 	poll := func() {
 		now := time.Now().UTC()
 
 		if !connected {
 			if err := client.Connect(); err != nil {
-				p.emitDeviceOffline(d, dps, now, err)
+				for _, dg := range devices {
+					p.emitDeviceOffline(dg.device, dg.dps, now, err)
+				}
 				return
 			}
 			connected = true
 		}
 
-		for _, dp := range dps {
-			dpInterval := time.Duration(dp.PollingIntervalMs) * time.Millisecond
-			if last, ok := lastPolled[dp.ID]; ok && now.Sub(last) < dpInterval {
+		for _, dg := range devices {
+			di := time.Duration(dg.device.PollingIntervalMs) * time.Millisecond
+			if di <= 0 {
+				di = time.Second
+			}
+			if last, ok := lastPolledDevice[dg.device.ID]; ok && now.Sub(last) < di {
 				continue
 			}
-			lastPolled[dp.ID] = now
-			p.readOne(ctx, client, d, dp, now)
+			lastPolledDevice[dg.device.ID] = now
+			client.SetUnitID(byte(dg.device.SlaveID))
+
+			for _, dp := range dg.dps {
+				dpInterval := time.Duration(dp.PollingIntervalMs) * time.Millisecond
+				if last, ok := lastPolledPoint[dp.ID]; ok && now.Sub(last) < dpInterval {
+					continue
+				}
+				lastPolledPoint[dp.ID] = now
+				p.readOne(ctx, client, dg.device, dp, now)
+			}
 		}
 	}
 
@@ -112,9 +145,9 @@ func (p *Poller) readOne(ctx context.Context, client modbus.Client, d device.Dev
 		return
 	}
 
-	readCtx, cancel := context.WithTimeout(ctx, time.Duration(d.TimeoutMs)*time.Millisecond)
+	readCtx, cancel := context.WithTimeout(ctx, time.Duration(d.PollingIntervalMs)*time.Millisecond)
 	start := time.Now()
-	raw, attempts, err := modbus.ReadWithRetry(readCtx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, d.Retry)
+	raw, attempts, err := modbus.ReadWithRetry(readCtx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, 0)
 	elapsed := time.Since(start)
 	cancel()
 
@@ -174,40 +207,40 @@ func (p *Poller) badReading(d device.Device, dp datapoint.DataPoint, eventTime t
 	}
 }
 
-// BuildClient constructs a Modbus client for a device's configured
+// BuildClient constructs a Modbus client for a connection's configured
 // protocol. Exported so the API layer can build short-lived clients for
 // "Test Connection" / "Test Read" without touching the Manager's
-// long-lived polling connections.
-func BuildClient(d device.Device) (modbus.Client, error) {
-	timeout := time.Duration(d.TimeoutMs) * time.Millisecond
+// long-lived polling connections. It does not set a slave/unit ID —
+// callers call Client.SetUnitID for whichever device they're about to
+// read, since one Connection can serve several devices at different IDs.
+func BuildClient(c connection.Connection) (modbus.Client, error) {
+	timeout := time.Duration(c.TimeoutMs) * time.Millisecond
 
-	switch d.Protocol {
-	case device.TCP:
-		if d.IPAddress == "" {
-			return nil, fmt.Errorf("TCP device %q has no ip_address configured", d.Name)
+	switch c.Protocol {
+	case connection.TCP:
+		if c.IPAddress == "" {
+			return nil, fmt.Errorf("TCP connection %q has no ip_address configured", c.Name)
 		}
-		addr := fmt.Sprintf("%s:%d", d.IPAddress, d.Port)
+		addr := fmt.Sprintf("%s:%d", c.IPAddress, c.Port)
 		return modbus.NewTCPClient(modbus.TCPConfig{
 			Address: addr,
-			UnitID:  byte(d.SlaveID),
 			Timeout: timeout,
 		}), nil
 
-	case device.RTU:
-		if d.Interface == "" {
-			return nil, fmt.Errorf("RTU device %q has no interface configured", d.Name)
+	case connection.RTU:
+		if c.Interface == "" {
+			return nil, fmt.Errorf("RTU connection %q has no interface configured", c.Name)
 		}
 		return modbus.NewRTUClient(modbus.RTUConfig{
-			Interface: d.Interface,
-			BaudRate:  d.BaudRate,
-			DataBits:  d.DataBits,
-			Parity:    d.Parity,
-			StopBits:  d.StopBits,
-			SlaveID:   byte(d.SlaveID),
+			Interface: c.Interface,
+			BaudRate:  c.BaudRate,
+			DataBits:  c.DataBits,
+			Parity:    c.Parity,
+			StopBits:  c.StopBits,
 			Timeout:   timeout,
 		}), nil
 
 	default:
-		return nil, fmt.Errorf("unknown protocol %q", d.Protocol)
+		return nil, fmt.Errorf("unknown protocol %q", c.Protocol)
 	}
 }

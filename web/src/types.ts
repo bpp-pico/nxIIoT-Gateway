@@ -2,7 +2,7 @@ export type Protocol = 'RTU' | 'TCP'
 export type Priority = 'CRITICAL' | 'HIGH' | 'NORMAL' | 'LOW'
 export type DataType = 'INT16' | 'UINT16' | 'INT32' | 'UINT32' | 'FLOAT32' | 'FLOAT64'
 
-export interface Device {
+export interface Connection {
   id: number
   name: string
   protocol: Protocol
@@ -13,10 +13,17 @@ export interface Device {
   stop_bits?: number
   ip_address?: string
   port?: number
-  slave_id: number
-  polling_interval_ms: number
   timeout_ms: number
   retry: number
+  enabled: boolean
+}
+
+export interface Device {
+  id: number
+  name: string
+  connection_id: number
+  slave_id: number
+  polling_interval_ms: number
   enabled: boolean
   status?: string
   last_seen?: string
@@ -122,10 +129,13 @@ export interface ConfigExport {
   forwarder: Record<string, unknown>
   mqtt: Record<string, unknown>
   time: Record<string, unknown>
+  connections: Connection[]
   devices: Array<Device & { data_points: DataPoint[] }>
 }
 
 export interface ConfigImportResult {
+  connections_created: number
+  connections_updated: number
   devices_created: number
   devices_updated: number
   data_points_created: number

@@ -38,12 +38,13 @@ type deviceExportDTO struct {
 }
 
 type configExportDTO struct {
-	ExportedAt time.Time          `json:"exported_at"`
-	Gateway    gatewayExportDTO   `json:"gateway"`
-	Forwarder  forwarderExportDTO `json:"forwarder"`
-	MQTT       mqttExportDTO      `json:"mqtt"`
-	Time       timeExportDTO      `json:"time"`
-	Devices    []deviceExportDTO  `json:"devices"`
+	ExportedAt  time.Time          `json:"exported_at"`
+	Gateway     gatewayExportDTO   `json:"gateway"`
+	Forwarder   forwarderExportDTO `json:"forwarder"`
+	MQTT        mqttExportDTO      `json:"mqtt"`
+	Time        timeExportDTO      `json:"time"`
+	Connections []connectionDTO    `json:"connections"`
+	Devices     []deviceExportDTO  `json:"devices"`
 }
 
 type gatewayExportDTO struct {
@@ -62,6 +63,12 @@ type timeExportDTO struct {
 // backup/documentation but are static config.yaml values at runtime — see
 // importConfig.
 func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
+	conns, err := s.connRepo.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
 	devices, err := s.deviceRepo.List(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -91,6 +98,11 @@ func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
 		Time: timeExportDTO{NTPServer: s.cfg.Time.NTPServer, Timezone: s.cfg.Time.Timezone},
 	}
 
+	out.Connections = make([]connectionDTO, len(conns))
+	for i, c := range conns {
+		out.Connections[i] = toConnectionDTO(c)
+	}
+
 	out.Devices = make([]deviceExportDTO, len(devices))
 	for i, d := range devices {
 		dps, err := s.datapointRepo.ListByDevice(r.Context(), d.ID)
@@ -110,11 +122,13 @@ func (s *Server) exportConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 type configImportResult struct {
-	DevicesCreated    int      `json:"devices_created"`
-	DevicesUpdated    int      `json:"devices_updated"`
-	DataPointsCreated int      `json:"data_points_created"`
-	DataPointsUpdated int      `json:"data_points_updated"`
-	Errors            []string `json:"errors,omitempty"`
+	ConnectionsCreated int      `json:"connections_created"`
+	ConnectionsUpdated int      `json:"connections_updated"`
+	DevicesCreated     int      `json:"devices_created"`
+	DevicesUpdated     int      `json:"devices_updated"`
+	DataPointsCreated  int      `json:"data_points_created"`
+	DataPointsUpdated  int      `json:"data_points_updated"`
+	Errors             []string `json:"errors,omitempty"`
 }
 
 // importConfig applies a config export's Devices/DataPoints (§18). Only
@@ -134,6 +148,11 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var errs []string
+	for _, cexp := range payload.Connections {
+		if err := cexp.toConnection().Validate(); err != nil {
+			errs = append(errs, fmt.Sprintf("connection %q: %v", cexp.Name, err))
+		}
+	}
 	for _, dexp := range payload.Devices {
 		if err := dexp.toDevice().Validate(); err != nil {
 			errs = append(errs, fmt.Sprintf("device %q: %v", dexp.Name, err))
@@ -152,8 +171,47 @@ func (s *Server) importConfig(w http.ResponseWriter, r *http.Request) {
 
 	result := configImportResult{}
 	ctx := r.Context()
+
+	// connIDMap tracks exported connection id -> restored connection id, so
+	// devices below (which reference connections by id in a separate
+	// top-level array, not nested) get repointed at whatever id the
+	// connection actually landed on — matters when restoring onto an empty
+	// gateway where Create assigns fresh ids.
+	connIDMap := make(map[int64]int64, len(payload.Connections))
+	for _, cexp := range payload.Connections {
+		c := cexp.toConnection()
+
+		var connID int64
+		if cexp.ID != 0 {
+			if _, err := s.connRepo.Get(ctx, cexp.ID); err == nil {
+				if err := s.connRepo.Update(ctx, cexp.ID, c); err != nil {
+					result.Errors = append(result.Errors, fmt.Sprintf("update connection %q: %v", cexp.Name, err))
+					continue
+				}
+				connID = cexp.ID
+				result.ConnectionsUpdated++
+			}
+		}
+		if connID == 0 {
+			id, err := s.connRepo.Create(ctx, c)
+			if err != nil {
+				result.Errors = append(result.Errors, fmt.Sprintf("create connection %q: %v", cexp.Name, err))
+				continue
+			}
+			connID = id
+			result.ConnectionsCreated++
+		}
+		connIDMap[cexp.ID] = connID
+	}
+
 	for _, dexp := range payload.Devices {
 		d := dexp.toDevice()
+		if newConnID, ok := connIDMap[d.ConnectionID]; ok {
+			d.ConnectionID = newConnID
+		} else {
+			result.Errors = append(result.Errors, fmt.Sprintf("device %q: connection id %d not found in import payload", dexp.Name, d.ConnectionID))
+			continue
+		}
 
 		var deviceID int64
 		if dexp.ID != 0 {

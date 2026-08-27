@@ -13,6 +13,7 @@ import (
 	"nxiiot-gateway/internal/acquisition"
 	"nxiiot-gateway/internal/api"
 	"nxiiot-gateway/internal/config"
+	"nxiiot-gateway/internal/connection"
 	"nxiiot-gateway/internal/datapoint"
 	"nxiiot-gateway/internal/device"
 	"nxiiot-gateway/internal/diagnostics"
@@ -111,9 +112,10 @@ func main() {
 	// Web UI takes effect without a gateway restart.
 	statusStore := status.NewStore()
 	diagStore := diagnostics.NewStore()
+	connRepo := connection.NewRepository(db)
 	deviceRepo := device.NewRepository(db)
 	datapointRepo := datapoint.NewRepository(db)
-	manager := acquisition.NewManager(ctx, log, deviceRepo, datapointRepo, func(r acquisition.Reading) {
+	manager := acquisition.NewManager(ctx, log, connRepo, deviceRepo, datapointRepo, func(r acquisition.Reading) {
 		statusStore.Update(r.DeviceID, string(r.Quality), r.EventTimestamp)
 		proc.Process(ctx, r)
 		if r.Value != nil {

@@ -4,6 +4,7 @@ import type {
   ApplyNetworkResult,
   ConfigExport,
   ConfigImportResult,
+  Connection,
   DashboardSummary,
   DataPoint,
   Device,
@@ -40,6 +41,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listSerialPorts: () => request<{ ports: string[] }>('/api/system/serial-ports'),
+
+  listConnections: () => request<Connection[]>('/api/connections'),
+  createConnection: (c: Partial<Connection>) =>
+    request<Connection>('/api/connections', { method: 'POST', body: JSON.stringify(c) }),
+  updateConnection: (id: number, c: Partial<Connection>) =>
+    request<Connection>(`/api/connections/${id}`, { method: 'PUT', body: JSON.stringify(c) }),
+  deleteConnection: (id: number) => request<void>(`/api/connections/${id}`, { method: 'DELETE' }),
 
   listDevices: () => request<Device[]>('/api/devices'),
   createDevice: (d: Partial<Device>) =>

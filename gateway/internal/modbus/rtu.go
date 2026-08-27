@@ -8,13 +8,16 @@ import (
 )
 
 // RTUConfig configures a Modbus RTU (RS-485) client connection (FR-001).
+// There is deliberately no slave ID here — a connection is the physical
+// link, shared by potentially several devices at different slave IDs
+// (real RTU multi-drop); use Client.SetUnitID before each device's reads
+// instead (see client.go's doc comment).
 type RTUConfig struct {
 	Interface string // serial device path, e.g. "/dev/ttyUSB0" or "COM3"
 	BaudRate  int
 	DataBits  int
 	Parity    string // "N", "E", or "O"
 	StopBits  int
-	SlaveID   byte
 	Timeout   time.Duration
 }
 
@@ -31,7 +34,6 @@ func NewRTUClient(cfg RTUConfig) Client {
 	handler.DataBits = cfg.DataBits
 	handler.Parity = cfg.Parity
 	handler.StopBits = cfg.StopBits
-	handler.SlaveId = cfg.SlaveID
 	handler.Timeout = cfg.Timeout
 
 	return &rtuClient{
@@ -46,6 +48,10 @@ func (t *rtuClient) Connect() error {
 
 func (t *rtuClient) Close() error {
 	return t.handler.Close()
+}
+
+func (t *rtuClient) SetUnitID(id byte) {
+	t.handler.SlaveId = id
 }
 
 func (t *rtuClient) Read(ctx context.Context, fc FunctionCode, address, quantity uint16) ([]byte, error) {

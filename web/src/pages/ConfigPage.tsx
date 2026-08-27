@@ -574,6 +574,14 @@ function BackupRestoreSection() {
         <table style={{ ...styles.table, marginTop: '1rem' }}>
           <tbody>
             <tr>
+              <td style={styles.td}>Connections created</td>
+              <td style={styles.td}>{importResult.connections_created}</td>
+            </tr>
+            <tr>
+              <td style={styles.td}>Connections updated</td>
+              <td style={styles.td}>{importResult.connections_updated}</td>
+            </tr>
+            <tr>
               <td style={styles.td}>Devices created</td>
               <td style={styles.td}>{importResult.devices_created}</td>
             </tr>
