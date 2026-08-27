@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { DataPoint, Device } from '../types'
 import { styles } from '../styles'
+import { Icon } from '../icons'
 import { Modal } from './Modal'
 import { DataPointForm } from './DataPointForm'
 
@@ -64,12 +65,13 @@ export function DataPointsPanel({ device, onClose }: DataPointsPanelProps) {
   }
 
   return (
-    <div style={{ marginTop: '1rem', border: '1px solid #ddd', borderRadius: 8, padding: '1rem' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h3 style={{ margin: 0 }}>Data Points — {device.name}</h3>
+    <div style={{ marginTop: '1.25rem', background: '#fff', border: '1px solid #ECE9F7', borderRadius: 20, padding: '1.25rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 800 }}>Data Points — {device.name}</h3>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button style={styles.primaryButton} onClick={() => setEditing('new')}>
-            + Add Data Point
+          <button style={{ ...styles.primaryButton, display: 'inline-flex', alignItems: 'center', gap: 8 }} onClick={() => setEditing('new')}>
+            <Icon name="plus" size={14} color="#fff" />
+            Add Data Point
           </button>
           <button style={styles.smallButton} onClick={onClose}>
             Close
@@ -100,29 +102,27 @@ export function DataPointsPanel({ device, onClose }: DataPointsPanelProps) {
           <tbody>
             {points.map((dp) => (
               <tr key={dp.id}>
-                <td style={styles.td}>{dp.tag_name}</td>
+                <td style={{ ...styles.td, fontWeight: 700 }}>{dp.tag_name}</td>
                 <td style={styles.td}>{dp.function_code}</td>
                 <td style={styles.td}>{dp.register_address}</td>
                 <td style={styles.td}>{dp.data_type}</td>
                 <td style={styles.td}>{dp.scale}</td>
                 <td style={styles.td}>{dp.unit}</td>
                 <td style={styles.td}>
-                  <label>
-                    <input type="checkbox" checked={dp.enabled} onChange={() => handleToggleEnabled(dp)} />
-                  </label>
+                  <input type="checkbox" style={styles.checkbox} checked={dp.enabled} onChange={() => handleToggleEnabled(dp)} />
                 </td>
                 <td style={styles.td}>
                   <button style={styles.smallButton} onClick={() => handleTestRead(dp)}>
                     Test
                   </button>
-                  {testResults[dp.id] && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem' }}>{testResults[dp.id]}</span>}
+                  {testResults[dp.id] && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#6B6580' }}>{testResults[dp.id]}</span>}
                 </td>
                 <td style={styles.td}>
-                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
                     <button style={styles.smallButton} onClick={() => setEditing(dp)}>
                       Edit
                     </button>
-                    <button style={{ ...styles.smallButton, color: '#c0392b' }} onClick={() => handleDelete(dp)}>
+                    <button style={styles.dangerButton} onClick={() => handleDelete(dp)}>
                       Delete
                     </button>
                   </div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { Device } from '../types'
 import { styles, qualityBadgeStyle } from '../styles'
+import { Icon } from '../icons'
 import { Modal } from '../components/Modal'
 import { DeviceForm } from '../components/DeviceForm'
 import { DataPointsPanel } from '../components/DataPointsPanel'
@@ -68,10 +69,11 @@ export function DevicesPage() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ margin: 0 }}>Devices</h2>
-        <button style={styles.primaryButton} onClick={() => setEditing('new')}>
-          + Add Device
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem' }}>
+        <h2>Devices</h2>
+        <button style={{ ...styles.primaryButton, display: 'inline-flex', alignItems: 'center', gap: 8 }} onClick={() => setEditing('new')}>
+          <Icon name="plus" size={16} color="#fff" />
+          Add Device
         </button>
       </div>
 
@@ -81,59 +83,68 @@ export function DevicesPage() {
       ) : devices.length === 0 ? (
         <p style={styles.muted}>No devices configured yet.</p>
       ) : (
-        <table style={styles.table}>
-          <thead>
-            <tr>
-              <th style={styles.th}>Name</th>
-              <th style={styles.th}>Protocol</th>
-              <th style={styles.th}>Address</th>
-              <th style={styles.th}>Polling</th>
-              <th style={styles.th}>Enabled</th>
-              <th style={styles.th}>Status</th>
-              <th style={styles.th}>Test</th>
-              <th style={styles.th}></th>
-            </tr>
-          </thead>
-          <tbody>
-            {devices.map((d) => (
-              <tr key={d.id}>
-                <td style={styles.td}>
-                  <button
-                    style={{ ...styles.smallButton, fontWeight: selectedDeviceId === d.id ? 700 : 400 }}
-                    onClick={() => setSelectedDeviceId(selectedDeviceId === d.id ? null : d.id)}
-                  >
-                    {d.name}
-                  </button>
-                </td>
-                <td style={styles.td}>{d.protocol}</td>
-                <td style={styles.td}>{d.protocol === 'TCP' ? `${d.ip_address}:${d.port}` : d.interface}</td>
-                <td style={styles.td}>{d.polling_interval_ms} ms</td>
-                <td style={styles.td}>
-                  <input type="checkbox" checked={d.enabled} onChange={() => handleToggleEnabled(d)} />
-                </td>
-                <td style={styles.td}>
-                  {d.status ? <span style={qualityBadgeStyle(d.status)}>{d.status}</span> : <span style={styles.muted}>—</span>}
-                </td>
-                <td style={styles.td}>
-                  <button style={styles.smallButton} onClick={() => handleTestConnection(d)}>
-                    Test
-                  </button>
-                  {testResults[d.id] && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem' }}>{testResults[d.id]}</span>}
-                </td>
-                <td style={styles.td}>
-                  <div style={{ display: 'flex', gap: '0.4rem' }}>
-                    <button style={styles.smallButton} onClick={() => setEditing(d)}>
-                      Edit
-                    </button>
-                    <button style={{ ...styles.smallButton, color: '#c0392b' }} onClick={() => handleDelete(d)}>
-                      Delete
-                    </button>
-                  </div>
-                </td>
+        <div style={{ background: '#fff', border: '1px solid #ECE9F7', borderRadius: 20, padding: 8 }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th style={styles.th}>Name</th>
+                <th style={styles.th}>Protocol</th>
+                <th style={styles.th}>Address</th>
+                <th style={styles.th}>Polling</th>
+                <th style={styles.th}>Enabled</th>
+                <th style={styles.th}>Status</th>
+                <th style={styles.th}>Test</th>
+                <th style={styles.th}></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {devices.map((d) => (
+                <tr key={d.id}>
+                  <td style={styles.td}>
+                    <button
+                      style={{ ...styles.smallButton, border: 'none', padding: 0, background: 'transparent', color: '#1E1B2E', fontWeight: selectedDeviceId === d.id ? 700 : 600 }}
+                      onClick={() => setSelectedDeviceId(selectedDeviceId === d.id ? null : d.id)}
+                    >
+                      {d.name}
+                    </button>
+                  </td>
+                  <td style={styles.td}>{d.protocol}</td>
+                  <td style={styles.td}>{d.protocol === 'TCP' ? `${d.ip_address}:${d.port}` : d.interface}</td>
+                  <td style={styles.td}>{d.polling_interval_ms} ms</td>
+                  <td style={styles.td}>
+                    <input type="checkbox" style={styles.checkbox} checked={d.enabled} onChange={() => handleToggleEnabled(d)} />
+                  </td>
+                  <td style={styles.td}>
+                    {d.status ? (
+                      <span style={qualityBadgeStyle(d.status)}>
+                        <span style={styles.badgeDot} />
+                        {d.status}
+                      </span>
+                    ) : (
+                      <span style={styles.muted}>—</span>
+                    )}
+                  </td>
+                  <td style={styles.td}>
+                    <button style={styles.smallButton} onClick={() => handleTestConnection(d)}>
+                      Test
+                    </button>
+                    {testResults[d.id] && <span style={{ marginLeft: '0.5rem', fontSize: '0.8rem', color: '#6B6580' }}>{testResults[d.id]}</span>}
+                  </td>
+                  <td style={styles.td}>
+                    <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                      <button style={styles.smallButton} onClick={() => setEditing(d)}>
+                        Edit
+                      </button>
+                      <button style={styles.dangerButton} onClick={() => handleDelete(d)}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
 
       {selectedDevice && <DataPointsPanel device={selectedDevice} onClose={() => setSelectedDeviceId(null)} />}

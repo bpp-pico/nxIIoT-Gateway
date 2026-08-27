@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { styles } from '../styles'
+import { Icon } from '../icons'
 import type { StoreForwardStatus } from '../types'
 
 function fmtTime(v?: string) {
@@ -43,9 +44,11 @@ export function StoreForwardPage() {
         <>
           <div style={styles.cardGrid}>
             <div style={styles.card}>
+              <div style={styles.cardIcon}><Icon name="cloud" /></div>
               <div style={styles.cardTitle}>Server Status</div>
               <div style={styles.cardValue}>
                 <span style={status.server_connected ? styles.badgeGood : styles.badgeBad}>
+                  <span style={styles.badgeDot} />
                   {status.server_connected ? 'Connected' : 'Disconnected'}
                 </span>
               </div>
@@ -53,26 +56,31 @@ export function StoreForwardPage() {
             </div>
 
             <div style={styles.card}>
+              <div style={styles.cardIcon}><Icon name="queue" /></div>
               <div style={styles.cardTitle}>Pending Records</div>
               <div style={styles.cardValue}>{status.pending_records}</div>
             </div>
 
             <div style={styles.card}>
+              <div style={styles.cardIcon}><Icon name="sending" /></div>
               <div style={styles.cardTitle}>Sending</div>
               <div style={styles.cardValue}>{status.sending_records}</div>
             </div>
 
             <div style={styles.card}>
+              <div style={styles.cardIcon}><Icon name="retry" /></div>
               <div style={styles.cardTitle}>Retry Count</div>
               <div style={styles.cardValue}>{status.retry_count}</div>
             </div>
 
             <div style={styles.card}>
+              <div style={styles.cardIcon}><Icon name="storage" /></div>
               <div style={styles.cardTitle}>Storage Usage</div>
               <div style={styles.cardValue}>
                 {status.storage_used_percent !== undefined ? `${status.storage_used_percent.toFixed(1)}%` : '—'}
                 {status.storage_level && (
                   <span style={{ ...storageLevelBadgeStyle(status.storage_level), marginLeft: '0.5rem', verticalAlign: 'middle' }}>
+                    <span style={styles.badgeDot} />
                     {status.storage_level}
                   </span>
                 )}
@@ -85,22 +93,24 @@ export function StoreForwardPage() {
             </div>
           </div>
 
-          <table style={{ ...styles.table, marginTop: '1.5rem' }}>
-            <tbody>
-              <tr>
-                <td style={styles.td}>Oldest Pending Record</td>
-                <td style={styles.td}>{fmtTime(status.oldest_pending)}</td>
-              </tr>
-              <tr>
-                <td style={styles.td}>Newest Pending Record</td>
-                <td style={styles.td}>{fmtTime(status.newest_pending)}</td>
-              </tr>
-              <tr>
-                <td style={styles.td}>Last Sent to Server</td>
-                <td style={styles.td}>{fmtTime(status.server_last_sent_at)}</td>
-              </tr>
-            </tbody>
-          </table>
+          <div style={{ marginTop: '1.5rem', background: '#fff', border: '1px solid #ECE9F7', borderRadius: 20, padding: '0.25rem 1.25rem' }}>
+            <table style={{ ...styles.table, tableLayout: 'fixed' }}>
+              <tbody>
+                <tr>
+                  <td style={{ ...styles.td, color: '#6B6580', width: 260 }}>Oldest Pending Record</td>
+                  <td style={styles.td}>{fmtTime(status.oldest_pending)}</td>
+                </tr>
+                <tr>
+                  <td style={{ ...styles.td, color: '#6B6580', width: 260 }}>Newest Pending Record</td>
+                  <td style={styles.td}>{fmtTime(status.newest_pending)}</td>
+                </tr>
+                <tr>
+                  <td style={{ ...styles.td, color: '#6B6580', width: 260 }}>Last Sent to Server</td>
+                  <td style={styles.td}>{fmtTime(status.server_last_sent_at)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </>
       )}
     </div>

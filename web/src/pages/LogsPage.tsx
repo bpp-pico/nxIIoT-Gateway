@@ -1,14 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import { styles } from '../styles'
+import { styles, logLevelColor } from '../styles'
 import type { LogEntry } from '../types'
-
-const levelColor: Record<string, string> = {
-  ERROR: '#c0392b',
-  WARN: '#b7791f',
-  INFO: '#111',
-  DEBUG: '#888',
-}
 
 export function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -34,9 +27,9 @@ export function LogsPage() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2 style={{ margin: 0 }}>Logs</h2>
-        <label style={{ ...styles.muted, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-          <input type="checkbox" checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
+        <h2>Logs</h2>
+        <label style={{ ...styles.muted, display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+          <input type="checkbox" style={styles.checkbox} checked={autoRefresh} onChange={(e) => setAutoRefresh(e.target.checked)} />
           Auto-refresh
         </label>
       </div>
@@ -51,7 +44,7 @@ export function LogsPage() {
           logs.map((entry, i) => (
             <div key={i} style={styles.logLine}>
               <span style={styles.muted}>{new Date(entry.time).toLocaleTimeString()}</span>
-              <span style={{ color: levelColor[entry.level] ?? '#111', fontWeight: 700 }}>{entry.level}</span>
+              <span style={{ color: logLevelColor[entry.level] ?? '#1E1B2E', fontWeight: 700 }}>{entry.level}</span>
               <span>
                 {entry.message}
                 {entry.attrs && Object.keys(entry.attrs).length > 0 && (

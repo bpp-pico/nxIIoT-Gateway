@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { styles } from '../styles'
+import { Icon } from '../icons'
 import type { DashboardSummary, StoreForwardStatus, SystemInfo, TimeStatus } from '../types'
 
 function fmtPercent(v?: number) {
@@ -75,12 +76,14 @@ export function Dashboard() {
 
       <div style={styles.cardGrid}>
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="gateway" /></div>
           <div style={styles.cardTitle}>Gateway Status</div>
           <div style={styles.cardValue}>{system.status === 'ok' ? 'Running' : system.status}</div>
           <div style={styles.cardSub}>uptime {(system.uptime_seconds / 60).toFixed(1)} min</div>
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="cpu" /></div>
           <div style={styles.cardTitle}>CPU</div>
           <div style={styles.cardValue}>{fmtPercent(system.cpu_percent)}</div>
           <div style={styles.progressTrack}>
@@ -89,6 +92,7 @@ export function Dashboard() {
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="ram" /></div>
           <div style={styles.cardTitle}>RAM</div>
           <div style={styles.cardValue}>{fmtPercent(system.mem_used_percent)}</div>
           <div style={styles.progressTrack}>
@@ -100,6 +104,7 @@ export function Dashboard() {
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="storage" /></div>
           <div style={styles.cardTitle}>Storage</div>
           <div style={styles.cardValue}>{fmtPercent(system.disk_used_percent)}</div>
           <div style={styles.progressTrack}>
@@ -111,12 +116,14 @@ export function Dashboard() {
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="network" /></div>
           <div style={styles.cardTitle}>Network (cumulative)</div>
           <div style={styles.cardValue}>{fmtBytes(system.net_bytes_sent)}</div>
           <div style={styles.cardSub}>sent · {fmtBytes(system.net_bytes_recv)} received</div>
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="devices" /></div>
           <div style={styles.cardTitle}>Devices</div>
           <div style={styles.cardValue}>
             {summary.enabled_device_count} / {summary.device_count}
@@ -125,14 +132,17 @@ export function Dashboard() {
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="data-points" /></div>
           <div style={styles.cardTitle}>Data Points</div>
           <div style={styles.cardValue}>{summary.data_point_count}</div>
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="cloud" /></div>
           <div style={styles.cardTitle}>Server Connection</div>
           <div style={styles.cardValue}>
             <span style={storeForward.server_connected ? styles.badgeGood : styles.badgeBad}>
+              <span style={styles.badgeDot} />
               {storeForward.server_connected ? 'Connected' : 'Disconnected'}
             </span>
           </div>
@@ -140,15 +150,20 @@ export function Dashboard() {
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="queue" /></div>
           <div style={styles.cardTitle}>Pending Queue</div>
           <div style={styles.cardValue}>{storeForward.pending_records}</div>
           <div style={styles.cardSub}>{storeForward.retry_count} retries so far</div>
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="clock" /></div>
           <div style={styles.cardTitle}>Time Synchronization</div>
           <div style={styles.cardValue}>
-            <span style={timeQualityBadgeStyle(time.time_quality)}>{time.time_quality}</span>
+            <span style={timeQualityBadgeStyle(time.time_quality)}>
+              <span style={styles.badgeDot} />
+              {time.time_quality}
+            </span>
           </div>
           <div style={styles.cardSub}>{time.ntp_server || 'no NTP server configured'}</div>
         </div>

@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { styles } from '../styles'
+import { Icon } from '../icons'
 import type { ConfigImportResult, NetworkStatus, Settings } from '../types'
 
 export function ConfigPage() {
   return (
     <div>
-      <h2 style={{ marginTop: 0 }}>Config</h2>
+      <h2>Config</h2>
       <SettingsSection />
       <NetworkSection />
       <BackupRestoreSection />
@@ -88,7 +89,7 @@ function SettingsSection() {
         configs/config.yaml — any hand-added comments in that file are lost once saved from here.
       </p>
       {error && <div style={styles.errorBox}>{error}</div>}
-      {restarting && <div style={{ ...styles.errorBox, background: '#fff8e1', color: '#8a6d00' }}>Restarting gateway…</div>}
+      {restarting && <div style={{ ...styles.errorBox, background: '#FFF7E6', color: '#B45309' }}>Restarting gateway…</div>}
 
       <div style={styles.cardGrid}>
         <div style={styles.card}>
@@ -316,7 +317,7 @@ function NetworkSection() {
           {error && <div style={styles.errorBox}>{error}</div>}
 
           {confirmDeadline !== null && (
-            <div style={{ ...styles.errorBox, background: '#fff8e1', color: '#8a6d00', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div style={{ ...styles.errorBox, background: '#FFF7E6', color: '#B45309', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <span>New IP applied — confirm within {secondsLeft}s or it will revert automatically.</span>
               <button style={styles.primaryButton} onClick={handleConfirm}>
                 Confirm New IP
@@ -446,7 +447,8 @@ function BackupRestoreSection() {
       <p style={styles.muted}>
         Downloads devices, data points, and non-secret gateway settings as JSON. Passwords are never included.
       </p>
-      <button style={styles.primaryButton} onClick={handleExport}>
+      <button style={{ ...styles.button, display: 'inline-flex', alignItems: 'center', gap: 8 }} onClick={handleExport}>
+        <Icon name="download" size={15} color="#8B5CF6" />
         Export Configuration
       </button>
 
@@ -467,7 +469,8 @@ function BackupRestoreSection() {
           e.target.value = ''
         }}
       />
-      <button style={styles.button} disabled={importing} onClick={() => fileInputRef.current?.click()}>
+      <button style={{ ...styles.button, display: 'inline-flex', alignItems: 'center', gap: 8 }} disabled={importing} onClick={() => fileInputRef.current?.click()}>
+        <Icon name="upload" size={15} color="#8B5CF6" />
         {importing ? 'Importing…' : 'Import Configuration'}
       </button>
 
