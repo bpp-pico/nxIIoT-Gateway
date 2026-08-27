@@ -88,6 +88,63 @@ docker compose up -d --build
 
 The commands above are for running it locally in dev. In production it runs on a real always-on host (`192.168.99.200`) — see spec.md's "Live access points" for the live dashboard URL. Its Postgres credentials are still dev-shaped defaults (`internal_server`/`internal_server`) — not exposed outside the compose network (no host port mapping on the `postgres` service), but rotate before calling this fully production-ready.
 
+## Production deployment
+
+Two separate live targets, updated independently — neither deploy touches the other.
+
+### Gateway → Raspberry Pi (native/systemd, not Docker)
+
+The Pi (`NXGE-RPI`) runs the gateway natively under `nxiiot-gateway.service` (`Restart=always`) — see `gateway/deploy/nxiiot-gateway.service` and `DEPLOY_PLAN.md` for the original install. To ship a code change:
+
+```bash
+# 1. On your dev machine: commit and push (the Pi pulls from GitHub)
+git push
+
+# 2. SSH to the Pi (check spec.md's "Live access points" for the current IP — it's DHCP and can change)
+ssh nxge-admin@<pi-ip>
+
+# 3. On the Pi: pull and build natively (cross-compiling from Windows isn't used — see HANDOFF.md)
+cd ~/nxIIoT-Gateway
+git pull
+cd gateway
+go build -o /tmp/gateway-new ./cmd/gateway   # ~3 min, 18-19MB binary — slow but not stuck
+
+# 4. Back up the running binary, then hot-swap it — do NOT `cp` straight onto the target
+sudo cp /opt/nxiiot-gateway/gateway /opt/nxiiot-gateway/gateway.bak-$(date +%Y%m%d%H%M%S)
+sudo cp /tmp/gateway-new /opt/nxiiot-gateway/gateway.new
+sudo mv /opt/nxiiot-gateway/gateway.new /opt/nxiiot-gateway/gateway
+sudo systemctl restart nxiiot-gateway
+
+# 5. Verify
+sudo systemctl status nxiiot-gateway --no-pager
+journalctl -u nxiiot-gateway --no-pager -n 20
+```
+
+**Why `mv`, not `cp`, in step 4**: `cp`ing directly onto `/opt/nxiiot-gateway/gateway` while the service is running it fails with `cannot create regular file: Text file busy` (`ETXTBSY`) — Linux won't let you open-for-write a file that's mapped as a running process's executable text. `mv` (a `rename()`) just repoints the directory entry to a new inode without touching the old one, so the running process is undisturbed until the restart picks up the new binary. See MEMORY.md.
+
+The Web UI (`nxiiot-gateway-web.service`, Vite dev server, `web/deploy/nxiiot-gateway-web.service`) picks up frontend changes via `git pull` + Vite's own hot-reload — no rebuild or restart needed for `web/` changes alone.
+
+### `internal-server/` → vendor server (Docker Compose)
+
+Runs on a vendor-provided always-on host (`192.168.99.200`, user `vendor-app` — see spec.md's "Live access points"), not the Pi. Source is copied over SFTP rather than `git clone`, specifically to avoid needing git credentials on a third-party-managed machine — even though the host does have `git` installed.
+
+```bash
+# From your dev machine, for each changed file (or the whole internal-server/ tree):
+scp internal-server/<changed-file> vendor-app@192.168.99.200:/home/vendor-app/nxiiot-internal-server/<same-relative-path>
+
+# Then on the vendor server (or via ssh -- '<cmd>'):
+cd /home/vendor-app/nxiiot-internal-server
+docker compose -p nxiiot-internal-server up -d --build
+```
+
+Rebuilding is required even for a static-file-only change (`internal-server/static/dashboard.html`) — it's `go:embed`'d into the binary (`server.go`), not served from disk, so the Docker image must be rebuilt to pick it up.
+
+Verify after redeploying:
+```bash
+curl -s http://192.168.99.200:9100/health   # {"database_ok":true,"mqtt_connected":true,"status":"ok"}
+docker ps --filter name=nxiiot-internal-server
+```
+
 ## Status
 
 MVP (Phases 0-8) is complete — see [industrial_iot_gateway_handoff_dev_plan.md](industrial_iot_gateway_handoff_dev_plan.md) §24 (Definition of Done) for the full, honestly-caveated checklist, and §29 for the post-MVP Web UI Settings / Host Network IP addition. Summary:

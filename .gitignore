@@ -31,3 +31,6 @@ Thumbs.db
 
 # Claude Code session state
 .claude/
+
+# Local-only secrets, never commit
+CREDENTIALS.local.md
