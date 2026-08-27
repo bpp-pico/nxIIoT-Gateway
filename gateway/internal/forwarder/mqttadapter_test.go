@@ -1,9 +1,13 @@
 package forwarder_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,6 +19,63 @@ import (
 	"nxiiot-gateway/internal/forwarder"
 	"nxiiot-gateway/internal/queue"
 )
+
+// syncBuffer is a concurrency-safe io.Writer for asserting on log output
+// written from a background goroutine (RunReconnectWatchdog) while the
+// test goroutine reads it.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// startStoppableTestBroker is startTestBroker's sibling for tests that need
+// to force a real disconnect mid-test (rather than only at t.Cleanup) —
+// the watchdog tests need the broker to actually go away while the
+// adapter is connected to it, not a hand-rolled fake disconnect.
+func startStoppableTestBroker(t *testing.T) (brokerURL string, stop func()) {
+	t.Helper()
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve free port: %v", err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+
+	server := mochi.New(nil)
+	if err := server.AddHook(new(auth.AllowHook), nil); err != nil {
+		t.Fatalf("add allow-all hook: %v", err)
+	}
+	tcp := listeners.NewTCP(listeners.Config{ID: "test", Address: addr})
+	if err := server.AddListener(tcp); err != nil {
+		t.Fatalf("add tcp listener: %v", err)
+	}
+	go func() { _ = server.Serve() }()
+
+	stopped := false
+	stop = func() {
+		if stopped {
+			return
+		}
+		stopped = true
+		_ = server.Close()
+	}
+	t.Cleanup(stop)
+
+	return "tcp://" + addr, stop
+}
 
 // startTestBroker runs a real, embedded, pure-Go MQTT broker for the
 // duration of the test — matching this package's existing preference
@@ -164,6 +225,147 @@ func TestMQTTAdapterSendFailsWhenAckNeverArrives(t *testing.T) {
 	err := adapter.Send(ctx, sampleBatch())
 	if err == nil {
 		t.Fatal("expected Send to fail when no application-level ack arrives")
+	}
+}
+
+// TestMQTTAdapterWatchdogForcesReconnectWhenStuckPastThreshold reproduces
+// the shape of the real 2026-08-27 incident: the client is connected, then
+// genuinely disconnected (the broker actually goes away — not a simulated
+// event), and stays disconnected past ReconnectStuckAfter. The watchdog
+// must notice and force a reconnect attempt rather than trusting paho's
+// own AutoReconnect indefinitely.
+func TestMQTTAdapterWatchdogForcesReconnectWhenStuckPastThreshold(t *testing.T) {
+	brokerURL, stopBroker := startStoppableTestBroker(t)
+
+	var logBuf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	adapter := forwarder.NewMQTTAdapter(forwarder.MQTTAdapterConfig{
+		BrokerURL:           brokerURL,
+		ClientID:            "GW001-watchdog-test",
+		QoS:                 1,
+		DataTopic:           "gateway/GW001/data",
+		AckTopic:            "gateway/GW001/ack",
+		KeepAlive:           10 * time.Second,
+		ConnectTimeout:      500 * time.Millisecond,
+		PublishTimeout:      time.Second,
+		AckTimeout:          time.Second,
+		WatchdogInterval:    30 * time.Millisecond,
+		ReconnectStuckAfter: 100 * time.Millisecond,
+	}, logger)
+
+	connectCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := adapter.Connect(connectCtx); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer adapter.Disconnect(100)
+
+	if !adapter.IsConnected() {
+		t.Fatal("expected adapter connected before stopping the broker")
+	}
+
+	watchdogCtx, stopWatchdog := context.WithCancel(context.Background())
+	defer stopWatchdog()
+	go adapter.RunReconnectWatchdog(watchdogCtx)
+
+	stopBroker() // real disconnect — the broker is genuinely gone
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(logBuf.String(), "forcing reconnect") {
+			return // watchdog noticed and acted — test passes
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("expected watchdog to log a forced reconnect attempt within 2s, got log:\n%s", logBuf.String())
+}
+
+// TestMQTTAdapterWatchdogWaitsOutTheStuckWindow guards against the
+// watchdog being trigger-happy: a disconnect that hasn't yet sat past
+// ReconnectStuckAfter must not be force-reconnected — that would fight
+// paho's own (still-legitimate) retry attempts instead of only stepping
+// in once they've genuinely stalled.
+func TestMQTTAdapterWatchdogWaitsOutTheStuckWindow(t *testing.T) {
+	brokerURL, stopBroker := startStoppableTestBroker(t)
+
+	var logBuf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	adapter := forwarder.NewMQTTAdapter(forwarder.MQTTAdapterConfig{
+		BrokerURL:           brokerURL,
+		ClientID:            "GW001-watchdog-test-2",
+		QoS:                 1,
+		DataTopic:           "gateway/GW001/data",
+		AckTopic:            "gateway/GW001/ack",
+		KeepAlive:           10 * time.Second,
+		ConnectTimeout:      500 * time.Millisecond,
+		PublishTimeout:      time.Second,
+		AckTimeout:          time.Second,
+		WatchdogInterval:    20 * time.Millisecond,
+		ReconnectStuckAfter: 5 * time.Second, // deliberately long relative to the test's own window
+	}, logger)
+
+	connectCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := adapter.Connect(connectCtx); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer adapter.Disconnect(100)
+
+	watchdogCtx, stopWatchdog := context.WithCancel(context.Background())
+	defer stopWatchdog()
+	go adapter.RunReconnectWatchdog(watchdogCtx)
+
+	stopBroker()
+	time.Sleep(300 * time.Millisecond) // several watchdog ticks, nowhere near ReconnectStuckAfter
+
+	if strings.Contains(logBuf.String(), "forcing reconnect") {
+		t.Fatalf("watchdog acted before ReconnectStuckAfter elapsed, got log:\n%s", logBuf.String())
+	}
+}
+
+// TestMQTTAdapterWatchdogLeavesAHealthyConnectionAlone is the base case:
+// while genuinely connected, the watchdog must never intervene, no matter
+// how many ticks pass.
+func TestMQTTAdapterWatchdogLeavesAHealthyConnectionAlone(t *testing.T) {
+	brokerURL := startTestBroker(t)
+
+	var logBuf syncBuffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	adapter := forwarder.NewMQTTAdapter(forwarder.MQTTAdapterConfig{
+		BrokerURL:           brokerURL,
+		ClientID:            "GW001-watchdog-test-3",
+		QoS:                 1,
+		DataTopic:           "gateway/GW001/data",
+		AckTopic:            "gateway/GW001/ack",
+		KeepAlive:           10 * time.Second,
+		ConnectTimeout:      500 * time.Millisecond,
+		PublishTimeout:      time.Second,
+		AckTimeout:          time.Second,
+		WatchdogInterval:    20 * time.Millisecond,
+		ReconnectStuckAfter: 50 * time.Millisecond,
+	}, logger)
+
+	connectCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := adapter.Connect(connectCtx); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer adapter.Disconnect(100)
+
+	watchdogCtx, stopWatchdog := context.WithCancel(context.Background())
+	defer stopWatchdog()
+	go adapter.RunReconnectWatchdog(watchdogCtx)
+
+	time.Sleep(300 * time.Millisecond) // many ticks, well past ReconnectStuckAfter, connection never drops
+
+	if !adapter.IsConnected() {
+		t.Fatal("expected the connection to remain healthy for the duration of this test")
+	}
+	if strings.Contains(logBuf.String(), "forcing reconnect") {
+		t.Fatalf("watchdog acted on a healthy connection, got log:\n%s", logBuf.String())
 	}
 }
 

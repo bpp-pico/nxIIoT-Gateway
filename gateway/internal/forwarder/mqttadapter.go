@@ -37,7 +37,20 @@ type MQTTAdapterConfig struct {
 	// gateway_id+sequence_id idempotency (Rule 6) makes that safe.
 	AckTimeout time.Duration
 	TLS        *tls.Config // nil disables TLS
+
+	// WatchdogInterval and ReconnectStuckAfter tune RunReconnectWatchdog
+	// (see its doc comment) — zero on either defaults to the production
+	// values (15s / 45s) in NewMQTTAdapter. Exposed so tests can shrink
+	// them to make the stuck-reconnect path observable in well under a
+	// second instead of the real 45s.
+	WatchdogInterval    time.Duration
+	ReconnectStuckAfter time.Duration
 }
+
+const (
+	defaultWatchdogInterval    = 15 * time.Second
+	defaultReconnectStuckAfter = 45 * time.Second
+)
 
 // mqttBatch is the payload published to DataTopic. BatchID correlates the
 // publish with the application-level ack published back to AckTopic — QoS
@@ -64,11 +77,18 @@ type MQTTAdapter struct {
 	cfg    MQTTAdapterConfig
 	log    *slog.Logger
 
-	mu      sync.Mutex
-	pending map[string]chan mqttAck
+	mu             sync.Mutex
+	pending        map[string]chan mqttAck
+	disconnectedAt time.Time // zero value means "currently connected"
 }
 
 func NewMQTTAdapter(cfg MQTTAdapterConfig, log *slog.Logger) *MQTTAdapter {
+	if cfg.WatchdogInterval <= 0 {
+		cfg.WatchdogInterval = defaultWatchdogInterval
+	}
+	if cfg.ReconnectStuckAfter <= 0 {
+		cfg.ReconnectStuckAfter = defaultReconnectStuckAfter
+	}
 	a := &MQTTAdapter{cfg: cfg, log: log, pending: make(map[string]chan mqttAck)}
 
 	opts := mqtt.NewClientOptions().
@@ -117,6 +137,9 @@ func (a *MQTTAdapter) IsConnected() bool {
 
 func (a *MQTTAdapter) onConnect(c mqtt.Client) {
 	a.log.Info("mqtt connected", "broker", a.cfg.BrokerURL, "client_id", a.cfg.ClientID)
+	a.mu.Lock()
+	a.disconnectedAt = time.Time{}
+	a.mu.Unlock()
 	go a.subscribeWithRetry(c)
 }
 
@@ -141,6 +164,73 @@ func (a *MQTTAdapter) subscribeWithRetry(c mqtt.Client) {
 
 func (a *MQTTAdapter) onConnectionLost(_ mqtt.Client, err error) {
 	a.log.Warn("mqtt connection lost, will auto-reconnect", "error", err)
+	a.mu.Lock()
+	a.disconnectedAt = time.Now()
+	a.mu.Unlock()
+}
+
+// RunReconnectWatchdog is the automated version of the fix for a real
+// 2026-08-27 incident: paho's own AutoReconnect (SetAutoReconnect(true) +
+// SetConnectRetry(true), 5s retry interval — see NewMQTTAdapter) is
+// supposed to recover the connection on its own after onConnectionLost,
+// but was observed to silently stall after a "pingresp not received"
+// disconnect — the broker stayed reachable throughout (confirmed
+// independently with a direct TCP check), yet the client sat disconnected
+// for 7+ minutes with zero further log activity until the gateway process
+// was restarted by hand. That restart is the only thing that actually
+// unstuck it, which is exactly what this watchdog now does automatically,
+// scoped to just the MQTT client rather than the whole process.
+//
+// It intentionally waits ReconnectStuckAfter (default 45s — several
+// multiples of paho's own 5s retry interval) before concluding the
+// built-in retry has stalled rather than merely being slow, so a broker
+// that's genuinely still unreachable isn't hammered by two overlapping
+// reconnect loops. Runs until ctx is cancelled (the gateway's top-level
+// shutdown context — see cmd/gateway/adapter.go).
+func (a *MQTTAdapter) RunReconnectWatchdog(ctx context.Context) {
+	ticker := time.NewTicker(a.cfg.WatchdogInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.checkAndForceReconnect()
+		}
+	}
+}
+
+func (a *MQTTAdapter) checkAndForceReconnect() {
+	if a.client.IsConnectionOpen() {
+		return
+	}
+
+	a.mu.Lock()
+	stuckSince := a.disconnectedAt
+	a.mu.Unlock()
+	if stuckSince.IsZero() || time.Since(stuckSince) < a.cfg.ReconnectStuckAfter {
+		return
+	}
+
+	a.log.Warn("mqtt client disconnected too long, forcing reconnect", "disconnected_for", time.Since(stuckSince))
+	a.client.Disconnect(250)
+	token := a.client.Connect()
+	token.WaitTimeout(a.cfg.ConnectTimeout)
+	if err := token.Error(); err != nil {
+		a.log.Error("mqtt: forced reconnect attempt failed, will retry at next watchdog tick", "error", err)
+	}
+
+	if !a.client.IsConnectionOpen() {
+		// Still down — push the deadline out so the next forced attempt
+		// waits a full ReconnectStuckAfter rather than retrying every
+		// tick against a broker that's genuinely still unreachable. If it
+		// DID come back up, onConnect already zeroed disconnectedAt and
+		// this is skipped, so a fast recovery isn't mislabeled as stuck.
+		a.mu.Lock()
+		a.disconnectedAt = time.Now()
+		a.mu.Unlock()
+	}
 }
 
 func (a *MQTTAdapter) handleAck(_ mqtt.Client, msg mqtt.Message) {

@@ -52,6 +52,12 @@ func buildAdapter(ctx context.Context, cfg *config.Config, log *slog.Logger) (fo
 			return nil, nil, fmt.Errorf("connect to mqtt broker %s: %w", cfg.MQTT.BrokerURL, err)
 		}
 
+		// ctx (not connectCtx, which is cancelled right after Connect
+		// returns) is the gateway's top-level shutdown context — the
+		// watchdog runs for the process's lifetime, same as every other
+		// long-running loop (see HANDOFF.md).
+		go adapter.RunReconnectWatchdog(ctx)
+
 		return adapter, func() { adapter.Disconnect(250) }, nil
 
 	default:
