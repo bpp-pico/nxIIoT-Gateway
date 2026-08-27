@@ -18,12 +18,12 @@ LAN-only (must be on the same network as the device/server — none of these are
 |---|---|---|
 | Gateway Web UI | `http://192.168.99.93:5173` | Pi, `nxiiot-gateway-web.service` |
 | Gateway REST API | `http://192.168.99.93:8080/api/...` | Pi, `nxiiot-gateway.service` |
-| Internal Server dashboard | `http://192.168.99.200:9100/dashboard` (also served at `/`) | `vd-ct-app-srv`, `docker compose` project `nxiiot-internal-server` |
-| Internal Server JSON API | `http://192.168.99.200:9100/{health,latest,readings,stats}` | same |
-| Pi SSH | `ssh nxge-admin@192.168.99.93` | — |
-| Vendor server SSH | `ssh vendor-app@192.168.99.200` — key auth as of 2026-08-27, no password needed | — |
+| Internal Server dashboard | `http://192.168.99.200:9100/dashboard` (also served at `/`), or `http://100.79.124.58:9100/dashboard` via Tailscale | `vd-ct-app-srv`, `docker compose` project `nxiiot-internal-server` |
+| Internal Server JSON API | `http://192.168.99.200:9100/{health,latest,readings,stats}`, or `http://100.79.124.58:9100/...` via Tailscale | same |
+| Pi SSH | `ssh nxge-admin@192.168.99.93`, or `ssh nxge-admin@100.84.193.68` via Tailscale if the LAN IP doesn't respond | — |
+| Vendor server SSH | `ssh vendor-app@192.168.99.200` — key auth as of 2026-08-27, no password needed. Also reachable at `100.79.124.58` via Tailscale (confirmed 2026-08-27, `vd-ct-app-srv` joined Tailscale) if the LAN IP doesn't respond | — |
 
-The Pi has two LAN interfaces: `eth0` (currently `192.168.99.93`, DHCP) and `wlan0` (was `192.168.99.84`, DHCP — dropped off Wi-Fi as of 2026-08-27, `ip -4 addr show` no longer lists it). Both are DHCP-assigned and can change on reconnect/reboot — if neither IP above responds, check DHCP leases or the Pi's local console rather than assuming the service is down.
+The Pi has two LAN interfaces: `eth0` (currently `192.168.99.93`, DHCP) and `wlan0` (was `192.168.99.84`, DHCP — dropped off Wi-Fi as of 2026-08-27, `ip -4 addr show` no longer lists it). Both are DHCP-assigned and can change on reconnect/reboot — if neither IP above responds, check DHCP leases or the Pi's local console rather than assuming the service is down. As of 2026-08-27, `vd-ct-app-srv` (the internal-server host) is also joined to Tailscale at `100.79.124.58` — confirmed reachable (`GET /health` → 200) — so if its LAN IP (`192.168.99.200`) stops responding, try the Tailscale address before assuming the host itself is down, same as the Pi.
 
 ## Done
 
