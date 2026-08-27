@@ -4,6 +4,24 @@ import { styles } from '../styles'
 import { Icon } from '../icons'
 import type { ConfigImportResult, NetworkStatus, Settings } from '../types'
 
+// The gateway only stores/echoes this string (see internal/time/service.go)
+// — it does not currently drive any real timezone-aware conversion, the
+// gateway operates in UTC internally regardless of this value. A dropdown
+// still beats free text: it rules out typos and makes the valid values
+// discoverable. Intl.supportedValuesOf gives the full IANA list without
+// hand-maintaining one; browsers too old to support it (rare) just fall
+// back to a short common list rather than crashing.
+function timezoneOptions(current: string): string[] {
+  let zones: string[]
+  try {
+    zones = Intl.supportedValuesOf('timeZone')
+  } catch {
+    zones = ['UTC', 'Asia/Bangkok', 'Asia/Singapore', 'Asia/Tokyo', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
+  }
+  if (current && !zones.includes(current)) zones = [current, ...zones]
+  return zones
+}
+
 export function ConfigPage() {
   return (
     <div>
@@ -174,11 +192,17 @@ function SettingsSection() {
           </div>
           <div style={styles.formRow}>
             <label style={styles.label}>Timezone</label>
-            <input
-              style={styles.input}
+            <select
+              style={styles.select}
               value={settings.time.timezone}
               onChange={(e) => setSettings({ ...settings, time: { ...settings.time, timezone: e.target.value } })}
-            />
+            >
+              {timezoneOptions(settings.time.timezone).map((tz) => (
+                <option key={tz} value={tz}>
+                  {tz}
+                </option>
+              ))}
+            </select>
           </div>
           <div style={styles.formRow}>
             <label style={styles.label}>Sync Interval (seconds)</label>

@@ -187,6 +187,16 @@ export const styles = {
     color: color.text,
     background: color.surface,
   } satisfies CSSProperties,
+  select: {
+    padding: '0.55rem 0.7rem',
+    border: `1px solid ${color.borderStrong}`,
+    borderRadius: 10,
+    fontSize: '0.875rem',
+    fontFamily,
+    color: color.text,
+    background: color.surface,
+    cursor: 'pointer',
+  } satisfies CSSProperties,
   checkbox: { accentColor: color.accent, width: 17, height: 17, cursor: 'pointer' } satisfies CSSProperties,
   errorBox: {
     background: color.badBg,
