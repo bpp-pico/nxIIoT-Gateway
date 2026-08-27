@@ -1,0 +1,30 @@
+# systemd unit for the Web UI's Vite dev server on the Pi. Install to
+# /etc/systemd/system/nxiiot-gateway-web.service, then:
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now nxiiot-gateway-web
+#
+# Runs `npm run dev` (not a production build) deliberately — DEPLOY_PLAN.md
+# chose the Vite dev server over `vite build` + a static file server for the
+# hot-reload dev loop; this unit only adds persistence (survives SSH logout,
+# reboot, crash) on top of that same choice. vite.config.ts already sets
+# `server.host: true`, so no --host flag is needed here.
+#
+# Proxies /api to the gateway's own REST API on localhost:8080
+# (vite.config.ts), so this must run on the same host as nxiiot-gateway.
+
+[Unit]
+Description=nxIIoT Gateway Web UI (Vite dev server)
+After=network-online.target nxiiot-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=nxge-admin
+WorkingDirectory=/home/nxge-admin/nxIIoT-Gateway/web
+ExecStart=/usr/bin/npm run dev
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

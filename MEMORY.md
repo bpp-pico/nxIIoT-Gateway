@@ -4,6 +4,16 @@ Log entries here whenever a pattern failure or operational mistake is identified
 
 ---
 
+**Web UI was only ever started manually over SSH, so it died with the session and stayed dead (2026-08-27):**
+- what: `http://192.168.99.84:5173` was unreachable — port not listening at all — even though DEPLOY_PLAN.md documented it working in an earlier session
+- root cause: every prior session started the Vite dev server as a foreground/backgrounded shell command (`npm run dev -- --host 0.0.0.0`) inside an interactive SSH session, with no systemd unit; once that SSH session ended, the process was gone, and nothing was watching for it
+- correct: any process meant to survive between sessions on the Pi needs a systemd unit (mirror `gateway/deploy/nxiiot-gateway.service`'s pattern), not a manually-launched shell command — added `web/deploy/nxiiot-gateway-web.service` to close this specific gap. Before assuming a previously-working dev process is still running, check `systemctl status`/`ss -tlnp` rather than trusting old session notes.
+
+**`internal-server` Docker containers silently exited despite `restart: unless-stopped`, causing a ~20h MQTT ack outage (2026-08-27):**
+- what: routine SSH health check on the Pi found 131 `batch send failed, will retry` / `timed out waiting for ack` warnings in just the preceding 6 hours, continuous and back-to-back — same symptom as the 2026-08-26 "stuck MQTT client" incident in the entry below
+- root cause: `docker ps -a` on the Windows dev host showed `internal-server-internal-server-1` and `internal-server-postgres-1` both `Exited` ~20h earlier, even though `internal-server/docker-compose.yml` sets `restart: unless-stopped` on both — something (leading suspect: a Docker Desktop restart, which drops `unless-stopped` containers because Docker Desktop itself doesn't survive a host reboot as a running daemon) stopped them and nothing brought them back since there's no host-level supervisor for Docker Desktop itself. Confirmed via the direct-probe pattern from the entry below (`docker ps -a` first, not client-side log archaeology).
+- correct: `restart: unless-stopped` only protects against the *container* dying — it does not survive the Docker *daemon*/Desktop app itself not being running. On a dev-laptop host (not systemd-managed like the Pi), always verify the daemon/containers are actually up after any host restart, sleep, or Docker Desktop update. This is the concrete argument for the open Todo item "give `internal-server/` a permanent always-on host" in spec.md — until then, this will recur silently (Rule 1 means the Pi just queues harmlessly, so nothing pages anyone).
+
 **`pkill -f` killed its own SSH session (2026-08-26):**
 - what: ran `pkill -f '/tmp/server-sim'` over SSH to stop a background process; the SSH connection itself died (exit 255) instead of just the target process
 - root cause: `pkill -f` matches against the full command line of every process, including the invoking shell's own command line — which, since it literally contained the string `/tmp/server-sim` as a `pkill` argument, matched and killed itself (and the shell running it)
