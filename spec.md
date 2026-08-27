@@ -16,12 +16,14 @@ LAN-only (must be on the same network as the device/server — none of these are
 
 | What | URL | Runs on |
 |---|---|---|
-| Gateway Web UI | `http://192.168.99.84:5173` | Pi, `nxiiot-gateway-web.service` |
-| Gateway REST API | `http://192.168.99.84:8080/api/...` | Pi, `nxiiot-gateway.service` |
+| Gateway Web UI | `http://192.168.99.93:5173` | Pi, `nxiiot-gateway-web.service` |
+| Gateway REST API | `http://192.168.99.93:8080/api/...` | Pi, `nxiiot-gateway.service` |
 | Internal Server dashboard | `http://192.168.99.200:9100/dashboard` (also served at `/`) | `vd-ct-app-srv`, `docker compose` project `nxiiot-internal-server` |
 | Internal Server JSON API | `http://192.168.99.200:9100/{health,latest,readings,stats}` | same |
-| Pi SSH | `ssh nxge-admin@192.168.99.84` | — |
+| Pi SSH | `ssh nxge-admin@192.168.99.93` | — |
 | Vendor server SSH | `ssh vendor-app@192.168.99.200` | — |
+
+The Pi has two LAN interfaces: `eth0` (currently `192.168.99.93`, DHCP) and `wlan0` (was `192.168.99.84`, DHCP — dropped off Wi-Fi as of 2026-08-27, `ip -4 addr show` no longer lists it). Both are DHCP-assigned and can change on reconnect/reboot — if neither IP above responds, check DHCP leases or the Pi's local console rather than assuming the service is down.
 
 ## Done
 
@@ -49,6 +51,8 @@ LAN-only (must be on the same network as the device/server — none of these are
 ## Current state
 
 Everything above is committed and pushed to `origin/master`. The Pi is live and stable: gateway `active (running)` under systemd, running the retry-logic binary built 2026-08-27, RTU sensor reading `GOOD` at 250ms, `batch forwarded` succeeding continuously with zero `batch send failed` since the `internal-server/` move. Web UI is up under its own systemd unit. `internal-server/` runs on its new always-on host (`192.168.99.200`), `mqtt_connected: true`, `database_ok: true`, ingesting continuously. No task is mid-flight. Remaining open items (see Todo): RTC hardware, the netconfig apply/revert test, Postgres credential rotation, and deciding whether to migrate historical readings off the old laptop volume.
+
+**Later the same day**, the Pi's Wi-Fi (`wlan0`, `192.168.99.84`) dropped off the network — DHCP-assigned, so a reconnect can hand back a different address at any time. The Pi is still reachable via its wired `eth0` interface at `192.168.99.93` (confirmed live, both systemd services still `active`, gateway still forwarding) and over Tailscale (`100.84.193.68`). See "Live access points" above for current URLs, and MEMORY.md for the general lesson.
 
 **2026-08-27 session**: SSH'd into the Pi (`192.168.99.84`, `nxge-admin`) to check status; found and fixed three issues in sequence:
 

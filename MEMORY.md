@@ -4,6 +4,11 @@ Log entries here whenever a pattern failure or operational mistake is identified
 
 ---
 
+**Pi's LAN IP is DHCP-assigned on two interfaces and changed mid-session (2026-08-27):**
+- what: the Pi had been reachable all session at `192.168.99.84`; it then dropped off Wi-Fi (`wlan0`) and became unreachable at that address, while remaining reachable throughout at `192.168.99.93` (`eth0`) and over Tailscale (`100.84.193.68`)
+- root cause: both `eth0` and `wlan0` are DHCP-assigned (see `ip -4 addr show`, `dynamic` flag on both) — there is no static/reserved IP for either interface, so either can change on reconnect, router lease renewal, or reboot, and `wlan0` can drop off entirely if Wi-Fi association fails
+- correct: don't hardcode "the Pi's IP" as a fact — check `spec.md`'s "Live access points" table for the current known-good address before assuming a connection failure means the service is down, and try the Tailscale address (`100.84.193.68`, stable regardless of LAN DHCP) as a fallback before concluding the Pi itself is offline. If the user reports "the Pi dropped/changed IP," verify with a fresh SSH connection to the new address rather than continuing to retry the old one from memory.
+
 **`cp` onto a running binary fails with `ETXTBSY`; deploying a new gateway build needs `mv` instead (2026-08-27):**
 - what: `sudo cp /tmp/gateway-new /opt/nxiiot-gateway/gateway` failed with `cannot create regular file '/opt/nxiiot-gateway/gateway': Text file busy` while `nxiiot-gateway.service` was actively running the old binary
 - root cause: Linux refuses to open a file for writing (what `cp`'s truncate-and-overwrite does) while it's mapped as another process's executable text segment (`ETXTBSY`) — this only trips because the target of the write is the *same inode* currently being executed
