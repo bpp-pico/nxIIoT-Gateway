@@ -117,12 +117,26 @@ func (a *MQTTAdapter) IsConnected() bool {
 
 func (a *MQTTAdapter) onConnect(c mqtt.Client) {
 	a.log.Info("mqtt connected", "broker", a.cfg.BrokerURL, "client_id", a.cfg.ClientID)
-	token := c.Subscribe(a.cfg.AckTopic, a.cfg.QoS, a.handleAck)
-	go func() {
-		if token.Wait() && token.Error() != nil {
-			a.log.Error("mqtt: failed to subscribe to ack topic", "topic", a.cfg.AckTopic, "error", token.Error())
+	go a.subscribeWithRetry(c)
+}
+
+// subscribeWithRetry mirrors internal-server/consumer.go's subscribeWithRetry
+// — a subscribe that loses the race with a fresh disconnect is retried up to
+// 3 times with a short backoff before giving up and waiting for the next
+// reconnect, rather than only logging a single failure (the gap this closes:
+// a real log had exactly one subscribe failure with no follow-up attempt,
+// leaving the ack topic unsubscribed until the next full reconnect).
+func (a *MQTTAdapter) subscribeWithRetry(c mqtt.Client) {
+	for attempt := 1; attempt <= 3; attempt++ {
+		token := c.Subscribe(a.cfg.AckTopic, a.cfg.QoS, a.handleAck)
+		token.Wait()
+		if token.Error() == nil {
+			return
 		}
-	}()
+		a.log.Error("mqtt: failed to subscribe to ack topic, retrying", "topic", a.cfg.AckTopic, "attempt", attempt, "error", token.Error())
+		time.Sleep(time.Duration(attempt) * time.Second)
+	}
+	a.log.Error("mqtt: failed to subscribe to ack topic after 3 attempts; waiting for next reconnect", "topic", a.cfg.AckTopic)
 }
 
 func (a *MQTTAdapter) onConnectionLost(_ mqtt.Client, err error) {
