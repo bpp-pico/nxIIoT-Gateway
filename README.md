@@ -86,7 +86,7 @@ docker compose up -d --build
 - JSON API: `GET /health`, `GET /latest`, `GET /readings?gateway_id=&device_id=&datapoint_id=&limit=`, `GET /stats`.
 - Configure which broker it points at via the `MQTT_BROKER_URL` env var in `internal-server/docker-compose.yml` (defaults to the real `mqtt.nxge.co:1883`, not the dev `mosquitto` service in the root `docker-compose.yml` — these are two separate brokers for two separate purposes).
 
-Not yet production-hardened: it currently runs on whatever machine you start it on (no always-on host assigned yet), and its Postgres credentials are dev-shaped defaults (`internal_server`/`internal_server`) — see HANDOFF.md's "Next" section.
+The commands above are for running it locally in dev. In production it runs on a real always-on host (`192.168.99.200`) — see spec.md's "Live access points" for the live dashboard URL. Its Postgres credentials are still dev-shaped defaults (`internal_server`/`internal_server`) — not exposed outside the compose network (no host port mapping on the `postgres` service), but rotate before calling this fully production-ready.
 
 ## Status
 
@@ -104,4 +104,4 @@ MVP (Phases 0-8) is complete — see [industrial_iot_gateway_handoff_dev_plan.md
 - Full Modbus RTU read round-trip: **now verified live** against a real sensor (see above) — including finding a real hardware limit (this sensor times out below ~250ms polling interval, see `HANDOFF.md`). Still open: the CRC-error/`DEVICE_OFFLINE` failure paths haven't been triggered from live hardware yet (unplug mid-poll, forced bad response).
 - Host network IP (`internal/netconfig`): `Current()` verified live against a real Pi's `nmcli`. `ApplyStatic`/the confirm-or-auto-revert flow is still unverified — deliberately deferred until physical console access is arranged, since a bad apply could lock out the only remote path to the device.
 - RTC: the Linux `/dev/rtc0` ioctl code cross-compiles/unit-tests clean but has never run against a physical RTC chip — no such hardware connected in any session so far.
-- `internal-server/` isn't on an always-on host yet, and its Postgres credentials are dev-shaped defaults — see `HANDOFF.md`'s "Next" section.
+- `internal-server/` now runs on an always-on host (`192.168.99.200`, see spec.md); its Postgres credentials are still dev-shaped defaults — see `HANDOFF.md`'s "Next" section.
