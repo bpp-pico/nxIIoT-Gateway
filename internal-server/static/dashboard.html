@@ -16,6 +16,10 @@
     --border:          rgba(11,11,11,0.10);
     --series-1:        #2a78d6;
     --series-1-wash:   rgba(42,120,214,0.10);
+    --series-2:        #eb6834;
+    --series-2-wash:   rgba(235,104,52,0.10);
+    --series-3:        #1baf7a;
+    --series-3-wash:   rgba(27,175,122,0.10);
     --status-good:     #0ca30c;
     --status-critical: #d03b3b;
   }
@@ -31,6 +35,10 @@
       --border:          rgba(255,255,255,0.10);
       --series-1:        #3987e5;
       --series-1-wash:   rgba(57,135,229,0.14);
+      --series-2:        #d95926;
+      --series-2-wash:   rgba(217,89,38,0.14);
+      --series-3:        #199e70;
+      --series-3-wash:   rgba(25,158,112,0.14);
       --status-good:     #0ca30c;
       --status-critical: #e66767;
     }
@@ -115,6 +123,62 @@
   .table-scroll th, .table-scroll td { padding: 7px 12px; }
   .table-scroll tbody tr:last-child td { border-bottom: none; }
   code.quality { font-size: 11px; }
+
+  .series-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+  .series-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 5px 10px 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-1);
+    cursor: pointer;
+  }
+  .series-chip .chip-swatch { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex: none; }
+  .series-chip.active { color: var(--text-primary); }
+  .series-chip[data-slot="0"].active { border-color: var(--series-1); }
+  .series-chip[data-slot="1"].active { border-color: var(--series-2); }
+  .series-chip[data-slot="2"].active { border-color: var(--series-3); }
+  .series-chip.disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .trend-card { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px 16px 10px; }
+  .trend-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; flex-wrap: wrap; min-height: 20px; }
+  .trend-subtitle { font-size: 12px; color: var(--text-secondary); }
+  .trend-current { font-size: 26px; font-weight: 600; margin-top: 2px; }
+  .trend-legend { display: flex; flex-wrap: wrap; gap: 18px; }
+  .trend-legend-item { display: flex; align-items: center; gap: 8px; }
+  .trend-legend-swatch { width: 14px; height: 2px; border-radius: 2px; flex: none; }
+  .trend-legend-label { font-size: 12px; color: var(--text-secondary); }
+  .trend-legend-value { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+  .trend-chart-wrap { position: relative; }
+  .trend-svg { width: 100%; height: 220px; display: block; overflow: visible; }
+  .trend-tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+    line-height: 1.4;
+    box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+    opacity: 0;
+    transform: translate(-50%, calc(-100% - 10px));
+    white-space: nowrap;
+    z-index: 5;
+    transition: opacity 0.08s ease;
+  }
+  .trend-tooltip .tt-row { display: flex; align-items: center; gap: 6px; }
+  .trend-tooltip .tt-row + .tt-row { margin-top: 6px; }
+  .trend-tooltip .tt-key { width: 10px; height: 2px; border-radius: 2px; flex: none; }
+  .trend-tooltip .tt-value { font-weight: 700; font-size: 14px; color: var(--text-primary); }
+  .trend-tooltip .tt-time { color: var(--text-muted); font-size: 11px; margin-top: 2px; }
+  .trend-tooltip .tt-footer { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; }
 </style>
 </head>
 <body>
@@ -133,6 +197,7 @@
 
     <nav class="api-menu">
       <a href="#health-section">Health</a>
+      <a href="#trend-section">Trend</a>
       <a href="#gateways-section">Stats</a>
       <a href="#latest-section">Latest</a>
       <a href="#readings-section">Readings</a>
@@ -155,6 +220,30 @@
             <span class="badge" id="health-mqtt-badge"><span class="dot" id="health-mqtt-dot"></span><span id="health-mqtt-badge-text">—</span></span>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section id="trend-section">
+      <div class="section-head">
+        <h2>Trend</h2>
+        <div class="toolbar">
+          <div class="series-picker" id="trend-series-picker"></div>
+          <select id="trend-range">
+            <option value="900000">Last 15 min</option>
+            <option value="3600000" selected>Last hour</option>
+            <option value="21600000">Last 6 hours</option>
+            <option value="86400000">Last 24 hours</option>
+            <option value="604800000">Last 7 days</option>
+          </select>
+        </div>
+      </div>
+      <div class="trend-card">
+        <div class="trend-head" id="trend-head"></div>
+        <div class="trend-chart-wrap" id="trend-chart-wrap">
+          <svg class="trend-svg" id="trend-svg"></svg>
+          <div class="trend-tooltip" id="trend-tooltip"></div>
+        </div>
+        <div class="empty" id="trend-empty" style="display:none;">No readings in this time range.</div>
       </div>
     </section>
 
@@ -256,8 +345,7 @@ function setHealth(dotId, labelId, ok, okText, badText) {
   label.textContent = ok ? okText : badText;
 }
 
-async function renderTiles() {
-  const latest = await getJSON('/latest');
+async function renderTiles(latest) {
   const tilesEl = document.getElementById('tiles');
   const emptyEl = document.getElementById('tiles-empty');
 
@@ -394,10 +482,303 @@ async function renderHealth() {
   setHealthCard('health-mqtt', h.mqtt_connected, 'Connected', 'Disconnected');
 }
 
+// --- Trend chart: up to 3 series overlaid, fixed 0-100 y-axis, time-range x-axis, crosshair + tooltip ---
+
+const MAX_TREND_SERIES = 3; // categorical slots 1-3 are the only ones validated for simultaneous (all-pairs) CVD safety
+let selectedSeriesKeys = [];
+let trendSeries = []; // [{ key, label, points (oldest->newest), current }]
+
+function seriesKey(r) { return `${r.gateway_id}|${r.device_id}|${r.datapoint_id}`; }
+function seriesLabel(r) { return `${r.gateway_id} · device ${r.device_id} · point ${r.datapoint_id}`; }
+
+function toggleTrendSeries(key, latest) {
+  const idx = selectedSeriesKeys.indexOf(key);
+  if (idx !== -1) {
+    selectedSeriesKeys.splice(idx, 1);
+  } else if (selectedSeriesKeys.length < MAX_TREND_SERIES) {
+    selectedSeriesKeys.push(key);
+  }
+  renderSeriesPicker(latest);
+  renderTrend();
+}
+
+function renderSeriesPicker(latest) {
+  const picker = document.getElementById('trend-series-picker');
+  picker.innerHTML = '';
+  latest.forEach(r => {
+    const key = seriesKey(r);
+    const slot = selectedSeriesKeys.indexOf(key);
+    const active = slot !== -1;
+
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'series-chip' + (active ? ' active' : (selectedSeriesKeys.length >= MAX_TREND_SERIES ? ' disabled' : ''));
+    if (active) chip.dataset.slot = String(slot);
+    if (!active && selectedSeriesKeys.length >= MAX_TREND_SERIES) {
+      chip.title = `Compare up to ${MAX_TREND_SERIES} series at once — deselect one first`;
+    }
+
+    const swatch = document.createElement('span');
+    swatch.className = 'chip-swatch';
+    if (active) swatch.style.background = `var(--series-${slot + 1})`;
+
+    const label = document.createElement('span');
+    label.textContent = seriesLabel(r);
+
+    chip.appendChild(swatch);
+    chip.appendChild(label);
+    chip.addEventListener('click', () => toggleTrendSeries(key, latest));
+    picker.appendChild(chip);
+  });
+}
+
+function syncTrendSeriesPicker(latest) {
+  const keys = latest.map(seriesKey);
+  selectedSeriesKeys = selectedSeriesKeys.filter(k => keys.includes(k));
+  if (selectedSeriesKeys.length === 0 && keys.length) selectedSeriesKeys = [keys[0]];
+  renderSeriesPicker(latest);
+}
+
+function renderTrendHead(list) {
+  const head = document.getElementById('trend-head');
+  head.innerHTML = '';
+  if (list.length === 0) {
+    const sub = document.createElement('div');
+    sub.className = 'trend-subtitle';
+    sub.textContent = 'No series selected';
+    head.appendChild(sub);
+    return;
+  }
+  if (list.length === 1) {
+    const wrap = document.createElement('div');
+    const sub = document.createElement('div');
+    sub.className = 'trend-subtitle';
+    sub.textContent = list[0].label;
+    const cur = document.createElement('div');
+    cur.className = 'trend-current';
+    cur.textContent = fmtValue(list[0].current);
+    wrap.appendChild(sub);
+    wrap.appendChild(cur);
+    head.appendChild(wrap);
+    return;
+  }
+  const legend = document.createElement('div');
+  legend.className = 'trend-legend';
+  list.forEach((s, i) => {
+    const item = document.createElement('div');
+    item.className = 'trend-legend-item';
+    const swatch = document.createElement('span');
+    swatch.className = 'trend-legend-swatch';
+    swatch.style.background = `var(--series-${i + 1})`;
+    const label = document.createElement('span');
+    label.className = 'trend-legend-label';
+    label.textContent = s.label;
+    const value = document.createElement('span');
+    value.className = 'trend-legend-value';
+    value.textContent = fmtValue(s.current);
+    item.appendChild(swatch);
+    item.appendChild(label);
+    item.appendChild(value);
+    legend.appendChild(item);
+  });
+  head.appendChild(legend);
+}
+
+function fmtAxisTime(ms, withDate) {
+  const d = new Date(ms);
+  return withDate
+    ? d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function drawTrend() {
+  const svg = document.getElementById('trend-svg');
+  const wrap = document.getElementById('trend-chart-wrap');
+  const emptyEl = document.getElementById('trend-empty');
+
+  const validPointCount = trendSeries.reduce((n, s) => n + s.points.filter(p => p.value !== null && p.value !== undefined).length, 0);
+  if (!trendSeries.length || validPointCount < 2) {
+    svg.style.display = 'none';
+    emptyEl.style.display = 'block';
+    return;
+  }
+  emptyEl.style.display = 'none';
+  svg.style.display = 'block';
+
+  const w = Math.max(300, wrap.clientWidth);
+  const h = 240;
+  const pad = { top: 14, right: 14, bottom: 26, left: 40 };
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+  const allTimes = trendSeries.flatMap(s => s.points.map(p => new Date(p.event_timestamp).getTime()));
+  let tMin = Math.min(...allTimes), tMax = Math.max(...allTimes);
+  if (tMin === tMax) { tMin -= 60000; tMax += 60000; }
+
+  const plotX0 = pad.left, plotX1 = w - pad.right;
+  const plotY0 = pad.top, plotY1 = h - pad.bottom;
+  const yMin = 0, yMax = 100;
+
+  const xForTime = t => plotX0 + ((t - tMin) / ((tMax - tMin) || 1)) * (plotX1 - plotX0);
+  const yForVal = v => plotY1 - ((Math.min(yMax, Math.max(yMin, v)) - yMin) / (yMax - yMin)) * (plotY1 - plotY0);
+
+  const parts = [];
+
+  [0, 25, 50, 75, 100].forEach(t => {
+    const y = yForVal(t);
+    parts.push(`<line x1="${plotX0}" y1="${y.toFixed(1)}" x2="${plotX1}" y2="${y.toFixed(1)}" stroke="var(--gridline)" stroke-width="1"></line>`);
+    parts.push(`<text x="${plotX0 - 8}" y="${(y + 3).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--text-muted)">${t}</text>`);
+  });
+
+  const X_TICKS = 6;
+  const spanMs = tMax - tMin;
+  const withDate = spanMs > 24 * 3600 * 1000;
+  for (let i = 0; i <= X_TICKS; i++) {
+    const t = tMin + (i / X_TICKS) * spanMs;
+    const x = plotX0 + (i / X_TICKS) * (plotX1 - plotX0);
+    const anchor = i === 0 ? 'start' : (i === X_TICKS ? 'end' : 'middle');
+    parts.push(`<text x="${x.toFixed(1)}" y="${h - 8}" text-anchor="${anchor}" font-size="10" fill="var(--text-muted)">${escapeHTML(fmtAxisTime(t, withDate))}</text>`);
+  }
+
+  trendSeries.forEach((s, si) => {
+    let linePath = '';
+    s.points.forEach(p => {
+      if (p.value === null || p.value === undefined) return;
+      const x = xForTime(new Date(p.event_timestamp).getTime()), y = yForVal(p.value);
+      linePath += (linePath ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1) + ' ';
+    });
+    if (!linePath) return;
+
+    const colorVar = `var(--series-${si + 1})`;
+    if (trendSeries.length === 1) {
+      const areaPath = `${linePath} L${plotX1.toFixed(1)},${plotY1} L${plotX0.toFixed(1)},${plotY1} Z`;
+      parts.push(`<path d="${areaPath}" fill="var(--series-${si + 1}-wash)" stroke="none"></path>`);
+    }
+    parts.push(`<path d="${linePath}" fill="none" stroke="${colorVar}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path>`);
+
+    s.points.forEach(p => {
+      if (p.value === null || p.value === undefined || p.quality === 'GOOD') return;
+      const x = xForTime(new Date(p.event_timestamp).getTime()), y = yForVal(p.value);
+      parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.5" fill="var(--status-critical)" stroke="var(--surface-1)" stroke-width="2"></circle>`);
+    });
+
+    const withVal = s.points.slice().reverse().find(p => p.value !== null && p.value !== undefined);
+    if (withVal) {
+      const x = xForTime(new Date(withVal.event_timestamp).getTime()), y = yForVal(withVal.value);
+      parts.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="4" fill="${colorVar}" stroke="var(--surface-1)" stroke-width="2"></circle>`);
+    }
+  });
+
+  parts.push(`<line id="trend-crosshair" x1="0" y1="${plotY0}" x2="0" y2="${plotY1}" stroke="var(--text-muted)" stroke-width="1" stroke-dasharray="3,3" opacity="0"></line>`);
+  parts.push(`<rect id="trend-hitrect" x="${plotX0}" y="${plotY0}" width="${(plotX1 - plotX0).toFixed(1)}" height="${(plotY1 - plotY0).toFixed(1)}" fill="transparent"></rect>`);
+
+  svg.innerHTML = parts.join('');
+  attachTrendHover(svg, w, h, plotX0, plotX1, tMin, tMax, yForVal);
+}
+
+function attachTrendHover(svg, w, h, plotX0, plotX1, tMin, tMax, yForVal) {
+  const hitrect = document.getElementById('trend-hitrect');
+  const crosshair = document.getElementById('trend-crosshair');
+  const tooltip = document.getElementById('trend-tooltip');
+
+  function nearestPoint(points, targetTime) {
+    let best = null, bestDiff = Infinity;
+    points.forEach(p => {
+      const diff = Math.abs(new Date(p.event_timestamp).getTime() - targetTime);
+      if (diff < bestDiff) { bestDiff = diff; best = p; }
+    });
+    return best;
+  }
+
+  function handleMove(evt) {
+    const rect = svg.getBoundingClientRect();
+    if (!rect.width) return;
+    const px = (evt.clientX - rect.left) * (w / rect.width);
+    const clampedX = Math.min(Math.max(px, plotX0), plotX1);
+    const ratio = (clampedX - plotX0) / ((plotX1 - plotX0) || 1);
+    const targetTime = tMin + ratio * (tMax - tMin);
+
+    crosshair.setAttribute('x1', clampedX.toFixed(1));
+    crosshair.setAttribute('x2', clampedX.toFixed(1));
+    crosshair.setAttribute('opacity', '1');
+
+    const scaleXInv = rect.width / w, scaleYInv = rect.height / h;
+    tooltip.style.left = (clampedX * scaleXInv) + 'px';
+    tooltip.textContent = '';
+
+    let topY = 30;
+    trendSeries.forEach((s, si) => {
+      const nearest = nearestPoint(s.points, targetTime);
+      if (!nearest) return;
+
+      const row = document.createElement('div');
+      row.className = 'tt-row';
+      const key = document.createElement('span');
+      key.className = 'tt-key';
+      key.style.background = `var(--series-${si + 1})`;
+      const info = document.createElement('div');
+      const valueEl = document.createElement('div');
+      valueEl.className = 'tt-value';
+      valueEl.textContent = fmtValue(nearest.value);
+      const labelEl = document.createElement('div');
+      labelEl.className = 'tt-time';
+      labelEl.textContent = s.label;
+      info.appendChild(valueEl);
+      info.appendChild(labelEl);
+      row.appendChild(key);
+      row.appendChild(info);
+      tooltip.appendChild(row);
+
+      if (nearest.value !== null && nearest.value !== undefined) {
+        topY = Math.min(topY, yForVal(nearest.value) * scaleYInv);
+      }
+    });
+
+    const footer = document.createElement('div');
+    footer.className = 'tt-footer';
+    footer.textContent = fmtDateTime(new Date(targetTime).toISOString());
+    tooltip.appendChild(footer);
+
+    tooltip.style.top = Math.max(0, topY) + 'px';
+    tooltip.style.opacity = '1';
+  }
+
+  function handleLeave() {
+    crosshair.setAttribute('opacity', '0');
+    tooltip.style.opacity = '0';
+  }
+
+  hitrect.addEventListener('pointermove', handleMove);
+  hitrect.addEventListener('pointerleave', handleLeave);
+}
+
+async function renderTrend() {
+  if (!selectedSeriesKeys.length) {
+    trendSeries = [];
+    renderTrendHead([]);
+    drawTrend();
+    return;
+  }
+  const rangeMs = Number(document.getElementById('trend-range').value);
+  const since = new Date(Date.now() - rangeMs).toISOString();
+
+  trendSeries = await Promise.all(selectedSeriesKeys.map(async key => {
+    const [gatewayID, deviceID, datapointID] = key.split('|');
+    const rows = await getJSON(`/readings?gateway_id=${encodeURIComponent(gatewayID)}&device_id=${deviceID}&datapoint_id=${datapointID}&since=${encodeURIComponent(since)}`);
+    const points = rows.slice().reverse();
+    const lastWithVal = points.slice().reverse().find(p => p.value !== null && p.value !== undefined);
+    return { key, label: `${gatewayID} · device ${deviceID} · point ${datapointID}`, points, current: lastWithVal ? lastWithVal.value : null };
+  }));
+
+  renderTrendHead(trendSeries.map(s => ({ label: s.label, current: s.current })));
+  drawTrend();
+}
+
 async function refresh() {
   try {
+    const latest = await getJSON('/latest');
+    syncTrendSeriesPicker(latest);
     await renderStats(); // populates the gateway filter before the table reads it
-    await Promise.all([renderHealth(), renderTiles(), renderReadingsTable()]);
+    await Promise.all([renderHealth(), renderTiles(latest), renderReadingsTable(), renderTrend()]);
     document.getElementById('updated').textContent = 'updated just now';
   } catch (e) {
     document.getElementById('updated').textContent = 'update failed';
@@ -407,6 +788,8 @@ async function refresh() {
 
 document.getElementById('readings-gateway').addEventListener('change', renderReadingsTable);
 document.getElementById('readings-limit').addEventListener('change', renderReadingsTable);
+document.getElementById('trend-range').addEventListener('change', renderTrend);
+window.addEventListener('resize', () => { if (trendSeries.length) drawTrend(); });
 
 refresh();
 setInterval(refresh, REFRESH_MS);

@@ -30,15 +30,25 @@ func newHTTPServer(addr string, st *store, c *consumer, log *slog.Logger) *http.
 		gatewayID := r.URL.Query().Get("gateway_id")
 		deviceID := parseOptionalInt64(r.URL.Query().Get("device_id"))
 		datapointID := parseOptionalInt64(r.URL.Query().Get("datapoint_id"))
+		limitParam := r.URL.Query().Get("limit")
 		limit := 100
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+		if limitParam != "" {
+			if n, err := strconv.Atoi(limitParam); err == nil && n > 0 && n <= 5000 {
 				limit = n
+			}
+		}
+		var since *time.Time
+		if v := r.URL.Query().Get("since"); v != "" {
+			if t, err := time.Parse(time.RFC3339, v); err == nil {
+				since = &t
+				if limitParam == "" {
+					limit = 5000 // an unbounded time window with no explicit limit still needs a cap
+				}
 			}
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		rows, err := st.recent(ctx, gatewayID, deviceID, datapointID, limit)
+		rows, err := st.recent(ctx, gatewayID, deviceID, datapointID, since, limit)
 		if err != nil {
 			log.Error("query readings failed", "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)

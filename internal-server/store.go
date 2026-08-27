@@ -89,17 +89,19 @@ type readingRow struct {
 }
 
 // recent returns readings newest-first, optionally narrowed by gateway and/or
-// device+datapoint (nil deviceID/datapointID means "any").
-func (s *store) recent(ctx context.Context, gatewayID string, deviceID, datapointID *int64, limit int) ([]readingRow, error) {
+// device+datapoint (nil deviceID/datapointID means "any") and by a minimum
+// received_at (nil since means "no lower bound").
+func (s *store) recent(ctx context.Context, gatewayID string, deviceID, datapointID *int64, since *time.Time, limit int) ([]readingRow, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT gateway_id, sequence_id, device_id, datapoint_id, value, quality, event_timestamp, priority, received_at
 		FROM readings
 		WHERE ($1 = '' OR gateway_id = $1)
 		  AND ($2::bigint IS NULL OR device_id = $2)
 		  AND ($3::bigint IS NULL OR datapoint_id = $3)
+		  AND ($4::timestamptz IS NULL OR received_at >= $4)
 		ORDER BY received_at DESC
-		LIMIT $4
-	`, gatewayID, deviceID, datapointID, limit)
+		LIMIT $5
+	`, gatewayID, deviceID, datapointID, since, limit)
 	if err != nil {
 		return nil, err
 	}

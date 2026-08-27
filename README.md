@@ -83,7 +83,7 @@ docker compose up -d --build
 ```
 
 - Dashboard: http://localhost:9100/dashboard (also served at `/`, which 302-redirects there) — an in-page nav (Health / Stats / Latest / Readings) jumps to: a Health section with Database/MQTT status cards, live stat tiles with sparklines per gateway/device/datapoint, per-gateway totals, and a filterable recent-readings table. Everything renders from the JSON API below via client-side JS — no separate UI for the raw JSON.
-- JSON API: `GET /health`, `GET /latest`, `GET /readings?gateway_id=&device_id=&datapoint_id=&limit=`, `GET /stats`.
+- JSON API: `GET /health`, `GET /latest`, `GET /readings?gateway_id=&device_id=&datapoint_id=&limit=&since=`, `GET /stats`. `since` (RFC3339) filters to `received_at >= since`; when given without an explicit `limit` the cap rises to 5000 instead of the default 100 (both are hard-capped at 5000).
 - Configure which broker it points at via the `MQTT_BROKER_URL` env var in `internal-server/docker-compose.yml` (defaults to the real `mqtt.nxge.co:1883`, not the dev `mosquitto` service in the root `docker-compose.yml` — these are two separate brokers for two separate purposes).
 
 The commands above are for running it locally in dev. In production it runs on a real always-on host (`192.168.99.200`) — see spec.md's "Live access points" for the live dashboard URL. Its Postgres credentials are still dev-shaped defaults (`internal_server`/`internal_server`) — not exposed outside the compose network (no host port mapping on the `postgres` service), but rotate before calling this fully production-ready.
