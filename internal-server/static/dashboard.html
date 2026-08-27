@@ -67,7 +67,10 @@
     background: var(--surface-1);
   }
   .api-menu a:hover { color: var(--text-primary); border-color: var(--series-1); }
-  .api-menu a::after { content: "↗"; font-size: 10px; color: var(--text-muted); }
+
+  html { scroll-behavior: smooth; }
+  section[id] { scroll-margin-top: 16px; }
+  .status-value { font-size: 15px; font-weight: 600; margin-top: 2px; }
   .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
   .dot.good { background: var(--status-good); }
   .dot.bad { background: var(--status-critical); }
@@ -129,19 +132,39 @@
     </header>
 
     <nav class="api-menu">
-      <a href="/health" target="_blank" rel="noopener">Health</a>
-      <a href="/stats" target="_blank" rel="noopener">Stats</a>
-      <a href="/latest" target="_blank" rel="noopener">Latest</a>
-      <a href="/readings" target="_blank" rel="noopener">Readings</a>
+      <a href="#health-section">Health</a>
+      <a href="#gateways-section">Stats</a>
+      <a href="#latest-section">Latest</a>
+      <a href="#readings-section">Readings</a>
     </nav>
 
-    <section>
+    <section id="health-section">
+      <h2>Health</h2>
+      <div class="tiles">
+        <div class="tile">
+          <div class="tile-label">Database (Postgres)</div>
+          <div class="status-value" id="health-db-text">checking…</div>
+          <div class="tile-row" style="margin-top:8px;">
+            <span class="badge" id="health-db-badge"><span class="dot" id="health-db-dot"></span><span id="health-db-badge-text">—</span></span>
+          </div>
+        </div>
+        <div class="tile">
+          <div class="tile-label">MQTT Broker</div>
+          <div class="status-value" id="health-mqtt-text">checking…</div>
+          <div class="tile-row" style="margin-top:8px;">
+            <span class="badge" id="health-mqtt-badge"><span class="dot" id="health-mqtt-dot"></span><span id="health-mqtt-badge-text">—</span></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="latest-section">
       <h2>Latest values</h2>
       <div class="tiles" id="tiles"></div>
       <div class="empty" id="tiles-empty" style="display:none;">No readings yet.</div>
     </section>
 
-    <section>
+    <section id="gateways-section">
       <h2>Gateways</h2>
       <table id="stats-table">
         <thead>
@@ -152,7 +175,7 @@
       <div class="empty" id="stats-empty" style="display:none;">No gateways reporting yet.</div>
     </section>
 
-    <section>
+    <section id="readings-section">
       <div class="section-head">
         <h2>Recent readings</h2>
         <div class="toolbar">
@@ -356,10 +379,19 @@ async function renderReadingsTable() {
   }).join('');
 }
 
+function setHealthCard(prefix, ok, okText, badText) {
+  document.getElementById(prefix + '-dot').className = 'dot ' + (ok ? 'good' : 'bad');
+  document.getElementById(prefix + '-badge').className = 'badge ' + (ok ? 'good' : 'bad');
+  document.getElementById(prefix + '-badge-text').textContent = ok ? 'OK' : 'Down';
+  document.getElementById(prefix + '-text').textContent = ok ? okText : badText;
+}
+
 async function renderHealth() {
   const h = await getJSON('/health');
   setHealth('db-dot', 'db-label', h.database_ok, 'Database connected', 'Database down');
   setHealth('mqtt-dot', 'mqtt-label', h.mqtt_connected, 'MQTT connected', 'MQTT disconnected');
+  setHealthCard('health-db', h.database_ok, 'Connected', 'Disconnected');
+  setHealthCard('health-mqtt', h.mqtt_connected, 'Connected', 'Disconnected');
 }
 
 async function refresh() {

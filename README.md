@@ -82,7 +82,7 @@ cd internal-server
 docker compose up -d --build
 ```
 
-- Dashboard: http://localhost:9100/dashboard (also served at `/`) — live stat tiles with sparklines per gateway/device/datapoint, per-gateway totals, and a filterable recent-readings table.
+- Dashboard: http://localhost:9100/dashboard (also served at `/`, which 302-redirects there) — an in-page nav (Health / Stats / Latest / Readings) jumps to: a Health section with Database/MQTT status cards, live stat tiles with sparklines per gateway/device/datapoint, per-gateway totals, and a filterable recent-readings table. Everything renders from the JSON API below via client-side JS — no separate UI for the raw JSON.
 - JSON API: `GET /health`, `GET /latest`, `GET /readings?gateway_id=&device_id=&datapoint_id=&limit=`, `GET /stats`.
 - Configure which broker it points at via the `MQTT_BROKER_URL` env var in `internal-server/docker-compose.yml` (defaults to the real `mqtt.nxge.co:1883`, not the dev `mosquitto` service in the root `docker-compose.yml` — these are two separate brokers for two separate purposes).
 
@@ -144,6 +144,23 @@ Verify after redeploying:
 curl -s http://192.168.99.200:9100/health   # {"database_ok":true,"mqtt_connected":true,"status":"ok"}
 docker ps --filter name=nxiiot-internal-server
 ```
+
+### Deploying via automation (Claude Code / any non-interactive environment)
+
+The vendor server (`vendor-app@192.168.99.200`) used password-only auth until 2026-08-27 — a real limitation for any non-interactive tool (a CI job, a script, an AI coding agent), since a plain `ssh`/`scp` invocation with no TTY has nothing to type the password into and fails immediately with `Permission denied (publickey,password)`.
+
+**Fixed by adding SSH key auth** (2026-08-27): a dedicated keypair's public half (comment `claude-code-nxiiot-deploy`) was appended to `vendor-app`'s `~/.ssh/authorized_keys` on the vendor server, with the user's explicit setup action (they ran the `ssh`/`authorized_keys` commands themselves, once, interactively — see DEPLOY_PLAN.md). Plain `ssh`/`scp` from this repo's dev machine now authenticates with no password involved at all, so the whole `internal-server/` deploy flow above is automatable end-to-end.
+
+**Do not solve a missing-TTY problem by embedding a plaintext password in a script**, in any language or library (Python's `paramiko`, `sshpass`, `SSH_ASKPASS`, a `plink`/heredoc trick, etc.). A prior version of this section suggested exactly that (with a fabricated claim that it was "the exact mechanism used in Session 4" — it wasn't; DEPLOY_PLAN.md's actual Session 4 log has no Python/paramiko involvement anywhere). Switching the implementation language doesn't change what Claude Code's auto mode classifier is actually gating: an agent holding and transmitting a plaintext production credential unattended. That was correctly declined when proposed in this project's chat log — see MEMORY.md's 2026-08-27 entry on this. SSH keys are the sanctioned fix precisely because they remove the plaintext-secret-in-a-script problem entirely, rather than routing around the check that flags it.
+
+**What Claude Code's auto mode classifier actually blocks** — narrower than it might first appear, and unaffected by the SSH-key fix above:
+- ❌ **Overwriting the live binary a running production `systemd` service is executing** (`cp`/writing straight onto `/opt/nxiiot-gateway/gateway` while `nxiiot-gateway.service` is active) — blocked even after in-chat user confirmation, because a conversational "yes" isn't the same signal as an approved permission rule.
+- ❌ **An agent editing its own `autoMode` permission rules** in `.claude/settings.json`/`settings.local.json` to grant itself an exception to the block above — blocked regardless of who asked, since an agent shouldn't be able to route around its own safety boundary.
+- ✅ Everything else in a normal deploy goes through without issue: `git pull`, `go build`/`docker build` to a scratch path, backing up the old binary (`cp` to a *different* filename), SFTP/`scp`-style file uploads (now key-authenticated, see above), `docker compose up -d --build`, starting or restarting a *new* or *already-dormant* systemd unit, and `sudo` in general.
+
+In practice this means: build the new artifact and stage it (all automatable), then either (a) do the final "swap the live binary and restart" step as a `mv` + `systemctl restart` that a human runs themselves in their own terminal — see the Pi section above for the exact commands — or (b) for a Docker Compose target like `internal-server/`, there is no live-binary-swap step at all (`docker compose up -d --build` recreates the container from a fresh image), so the whole deploy is automatable end-to-end now that key auth is set up.
+
+**Known gotcha: `docker compose ... up -d --build` can silently reuse a stale cached layer** even when the only change is a `go:embed`'d static file (`internal-server/static/dashboard.html`) — seen live on 2026-08-27, where the `COPY . .` build layer reported `CACHED` despite the file content having actually changed on disk, and the container kept serving the old embedded HTML with no error of any kind. Always verify the *deployed, running* content directly (e.g. `curl` the live endpoint and `grep` for a string unique to the change) rather than trusting "Built"/cache-hit output in the build log. If verification fails, force it with `docker compose build --no-cache <service> && docker compose up -d --force-recreate <service>`. Also note: `internal-server/`'s `/` route is a `302` redirect to `/dashboard`, not the dashboard itself — `curl` it with `-L`, or hit `/dashboard` directly, or a "verification" can look empty/failed when the redeploy actually succeeded.
 
 ## Status
 
