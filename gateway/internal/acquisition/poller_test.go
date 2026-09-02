@@ -114,6 +114,14 @@ func uint16DataPoint(id, deviceID int64, tag string, address uint16) datapoint.D
 func runPollWithFakeClient(t *testing.T, client *fakeClient, devices []deviceWithPoints, nextDeviceDelayMs int, settle time.Duration) []Reading {
 	t.Helper()
 
+	// Shrink the once-per-full-pass yield to effectively nothing so it
+	// doesn't skew these tests' cycle-count/timing assertions, which were
+	// written (and tuned) before cycleYieldDelay existed. A dedicated test
+	// below overrides it back up to verify the yield actually happens.
+	origYield := cycleYieldDelay
+	cycleYieldDelay = 0
+	t.Cleanup(func() { cycleYieldDelay = origYield })
+
 	var mu sync.Mutex
 	var readings []Reading
 	p := &Poller{
@@ -297,5 +305,51 @@ func TestRunConnectionRetriesConnectAfterFloorDelay(t *testing.T) {
 
 	if hits := client.connectHitCount(); hits < 2 {
 		t.Fatalf("expected more than one Connect() attempt (retry after the floor delay), got %d", hits)
+	}
+}
+
+// TestRunConnectionYieldsOnceAfterEachFullPass proves cycleYieldDelay is
+// actually waited once per full round-robin pass (not skipped) — without it,
+// a single device with NextDeviceDelayMs=0 would spin the fake client's
+// near-instant Read as fast as the CPU allows, producing far more than a
+// handful of reads in the settle window. This is what gives the forwarder,
+// retention sweep, and Web UI's own DB reads (all sharing one SQLite
+// database — see MEMORY.md's 2026-09-02 SD-card I/O contention entry)
+// periodic breathing room against the acquisition goroutine, on top of the
+// existing NextDeviceDelayMs pacing between devices.
+func TestRunConnectionYieldsOnceAfterEachFullPass(t *testing.T) {
+	client := &fakeClient{}
+
+	devA := device.Device{ID: 1, Name: "A", ConnectionID: 1, SlaveID: 1, Enabled: true}
+	devices := []deviceWithPoints{
+		{device: devA, dps: []datapoint.DataPoint{uint16DataPoint(1, devA.ID, "a", 100)}},
+	}
+
+	origYield := cycleYieldDelay
+	cycleYieldDelay = 20 * time.Millisecond
+	t.Cleanup(func() { cycleYieldDelay = origYield })
+
+	conn := connection.Connection{ID: 1, Name: "test-conn", Protocol: connection.RTU, Interface: "/dev/ttyUSB0",
+		BaudRate: 9600, DataBits: 8, Parity: "N", StopBits: 1, TimeoutMs: 200, Retry: 0, Enabled: true,
+		NextDeviceDelayMs: 0}
+	p := &Poller{log: testLogger(), onReading: func(Reading) {}}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.runConnectionWithClient(ctx, conn, devices, client)
+	}()
+	time.Sleep(110 * time.Millisecond)
+	cancel()
+	wg.Wait()
+
+	// ~110ms / 20ms-per-pass allows roughly 5-6 passes; without the yield
+	// the fake client's instant Read would produce thousands in that
+	// window, so a generous upper bound still clearly distinguishes the
+	// two behaviors.
+	if reads := len(client.snapshotReadCalls()); reads > 20 {
+		t.Fatalf("expected cycleYieldDelay to bound passes to roughly settle/yield (~5-6), got %d reads — yield may not be applied", reads)
 	}
 }

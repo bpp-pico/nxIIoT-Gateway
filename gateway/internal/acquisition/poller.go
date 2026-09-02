@@ -36,6 +36,16 @@ type OnPollCycle func(deviceID int64, durationMs int64, datapointsRead int, at t
 // for a full second.
 var reconnectFloorDelay = time.Second
 
+// cycleYieldDelay is waited once after every full round-robin pass over all
+// of a connection's devices (in addition to conn.NextDeviceDelayMs between
+// each device) — a small, deliberate breathing gap so the acquisition
+// goroutine doesn't compete as continuously for CPU/DB-connection
+// scheduling against the forwarder, retention sweep, and Web UI's own DB
+// reads, all of which share the gateway's single SQLite database (see
+// MEMORY.md's 2026-09-02 SD-card I/O contention entry). Not a const so
+// tests can shrink it instead of paying it on every simulated pass.
+var cycleYieldDelay = 20 * time.Millisecond
+
 // deviceWithPoints pairs a device with its enabled data points, for polling
 // within one connection's shared goroutine.
 type deviceWithPoints struct {
@@ -145,6 +155,11 @@ func (p *Poller) runConnectionWithClient(ctx context.Context, conn connection.Co
 					return
 				}
 			}
+		}
+
+		if !wait(cycleYieldDelay) {
+			_ = client.Close()
+			return
 		}
 	}
 }

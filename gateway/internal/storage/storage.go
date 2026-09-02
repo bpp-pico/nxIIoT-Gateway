@@ -26,7 +26,16 @@ func Open(path string, migrationsDir string, log *slog.Logger) (*sql.DB, error) 
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
 	}
-	db.SetMaxOpenConns(1) // modernc.org/sqlite: serialize writers to avoid SQLITE_BUSY
+	// WAL mode lets any number of readers run concurrently with the single
+	// writer SQLite itself enforces — capping the pool at 1 connection (the
+	// previous setting) threw that away and serialized every read (Web UI
+	// API calls, forwarder fetches, retention/storage sweeps) behind every
+	// write too, including the time-critical acquisition insert. A small
+	// pool restores real read/write concurrency; busy_timeout(5000) above
+	// still makes the rare concurrent-writer collision wait-and-retry
+	// instead of surfacing SQLITE_BUSY. See MEMORY.md's 2026-09-02
+	// SD-card I/O contention entry.
+	db.SetMaxOpenConns(4)
 
 	if err := migrate(db, migrationsDir, log); err != nil {
 		db.Close()
