@@ -224,7 +224,7 @@ export function DevicesPage() {
                             : undefined
                         }
                       >
-                        {fmtNum(d.last_poll_duration_ms)} ms ({d.datapoints_polled ?? 0} pts, {d.block_reads ?? '?'} reads)
+                        {fmtNum(d.last_poll_duration_ms)} ms ({d.datapoints_polled ?? 0} pts, {d.block_reads ?? '?'} {d.block_reads === 1 ? 'read' : 'reads'})
                       </span>
                     ) : (
                       <span style={styles.muted}>—</span>
