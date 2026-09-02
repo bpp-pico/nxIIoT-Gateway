@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { styles } from '../styles'
 import { Icon } from '../icons'
+import { fmtNum } from '../format'
 import type { DashboardSummary, StoreForwardStatus, SystemInfo, TimeStatus } from '../types'
 
 function fmtPercent(v?: number) {
@@ -134,7 +135,7 @@ export function Dashboard() {
         <div style={styles.card}>
           <div style={styles.cardIcon}><Icon name="data-points" /></div>
           <div style={styles.cardTitle}>Data Points</div>
-          <div style={styles.cardValue}>{summary.data_point_count}</div>
+          <div style={styles.cardValue}>{fmtNum(summary.data_point_count)}</div>
         </div>
 
         <div style={styles.card}>
@@ -152,8 +153,8 @@ export function Dashboard() {
         <div style={styles.card}>
           <div style={styles.cardIcon}><Icon name="queue" /></div>
           <div style={styles.cardTitle}>Pending Queue</div>
-          <div style={styles.cardValue}>{storeForward.pending_records}</div>
-          <div style={styles.cardSub}>{storeForward.retry_count} retries so far</div>
+          <div style={styles.cardValue}>{fmtNum(storeForward.pending_records)}</div>
+          <div style={styles.cardSub}>{fmtNum(storeForward.retry_count)} retries so far</div>
         </div>
 
         <div style={styles.card}>

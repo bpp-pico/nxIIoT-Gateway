@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { styles, logLevelColor } from '../styles'
+import { fmtNum } from '../format'
 import type { LogEntry } from '../types'
+
+function fmtAttrValue(v: unknown): string {
+  return typeof v === 'number' ? fmtNum(v) : JSON.stringify(v)
+}
 
 export function LogsPage() {
   const [logs, setLogs] = useState<LogEntry[]>([])
@@ -51,7 +56,7 @@ export function LogsPage() {
                   <span style={styles.muted}>
                     {' '}
                     {Object.entries(entry.attrs)
-                      .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+                      .map(([k, v]) => `${k}=${fmtAttrValue(v)}`)
                       .join(' ')}
                   </span>
                 )}

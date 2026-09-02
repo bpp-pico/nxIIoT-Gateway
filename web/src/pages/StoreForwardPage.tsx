@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { styles } from '../styles'
 import { Icon } from '../icons'
+import { fmtNum } from '../format'
 import type { StoreForwardStatus } from '../types'
 
 function fmtTime(v?: string) {
@@ -58,19 +59,19 @@ export function StoreForwardPage() {
             <div style={styles.card}>
               <div style={styles.cardIcon}><Icon name="queue" /></div>
               <div style={styles.cardTitle}>Pending Records</div>
-              <div style={styles.cardValue}>{status.pending_records}</div>
+              <div style={styles.cardValue}>{fmtNum(status.pending_records)}</div>
             </div>
 
             <div style={styles.card}>
               <div style={styles.cardIcon}><Icon name="sending" /></div>
               <div style={styles.cardTitle}>Sending</div>
-              <div style={styles.cardValue}>{status.sending_records}</div>
+              <div style={styles.cardValue}>{fmtNum(status.sending_records)}</div>
             </div>
 
             <div style={styles.card}>
               <div style={styles.cardIcon}><Icon name="retry" /></div>
               <div style={styles.cardTitle}>Retry Count</div>
-              <div style={styles.cardValue}>{status.retry_count}</div>
+              <div style={styles.cardValue}>{fmtNum(status.retry_count)}</div>
             </div>
 
             <div style={styles.card}>

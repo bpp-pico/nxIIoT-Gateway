@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { styles } from '../styles'
 import { Icon } from '../icons'
+import { fmtNum } from '../format'
 import type { Diagnostics } from '../types'
 
 export function DiagnosticsPage() {
@@ -36,12 +37,12 @@ export function DiagnosticsPage() {
           <div style={styles.card}>
             <div style={styles.cardIcon}><Icon name="sending" /></div>
             <div style={styles.cardTitle}>Modbus TX</div>
-            <div style={styles.cardValue}>{diag.modbus_tx.toLocaleString()}</div>
+            <div style={styles.cardValue}>{fmtNum(diag.modbus_tx)}</div>
           </div>
           <div style={styles.card}>
             <div style={styles.cardIcon}><Icon name="sending" /></div>
             <div style={styles.cardTitle}>Modbus RX</div>
-            <div style={styles.cardValue}>{diag.modbus_rx.toLocaleString()}</div>
+            <div style={styles.cardValue}>{fmtNum(diag.modbus_rx)}</div>
           </div>
           <div style={styles.card}>
             <div style={styles.cardIcon}><Icon name="activity" /></div>
@@ -51,17 +52,17 @@ export function DiagnosticsPage() {
           <div style={styles.card}>
             <div style={styles.cardIcon}><Icon name="timeout" /></div>
             <div style={styles.cardTitle}>Timeouts</div>
-            <div style={styles.cardValue}>{diag.timeout_count}</div>
+            <div style={styles.cardValue}>{fmtNum(diag.timeout_count)}</div>
           </div>
           <div style={styles.card}>
             <div style={styles.cardIcon}><Icon name="crc" /></div>
             <div style={styles.cardTitle}>CRC Errors</div>
-            <div style={styles.cardValue}>{diag.crc_error_count}</div>
+            <div style={styles.cardValue}>{fmtNum(diag.crc_error_count)}</div>
           </div>
           <div style={styles.card}>
             <div style={styles.cardIcon}><Icon name="retry" /></div>
             <div style={styles.cardTitle}>Retry Count</div>
-            <div style={styles.cardValue}>{diag.retry_count}</div>
+            <div style={styles.cardValue}>{fmtNum(diag.retry_count)}</div>
           </div>
         </div>
       )}

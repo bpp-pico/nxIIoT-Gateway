@@ -7,6 +7,7 @@ import { Modal } from '../components/Modal'
 import { ConnectionForm } from '../components/ConnectionForm'
 import { DeviceForm } from '../components/DeviceForm'
 import { DataPointsPanel } from '../components/DataPointsPanel'
+import { fmtNum } from '../format'
 
 export function DevicesPage() {
   const [connections, setConnections] = useState<Connection[]>([])
@@ -210,7 +211,7 @@ export function DevicesPage() {
                             : undefined
                         }
                       >
-                        {d.last_poll_duration_ms} ms ({d.datapoints_polled ?? 0} pts)
+                        {fmtNum(d.last_poll_duration_ms)} ms ({d.datapoints_polled ?? 0} pts)
                       </span>
                     ) : (
                       <span style={styles.muted}>—</span>
