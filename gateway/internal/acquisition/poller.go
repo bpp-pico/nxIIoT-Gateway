@@ -25,8 +25,11 @@ type OnReading func(Reading)
 // polled for the current round-robin pass, reporting how long that took —
 // for the Web UI's per-device polling-timing display, so a connection's
 // next_device_delay_ms can be tuned against real hardware response times
-// instead of guessed.
-type OnPollCycle func(deviceID int64, durationMs int64, datapointsRead int, at time.Time)
+// instead of guessed. blockReads is how many physical Modbus requests
+// (planBlockReads' block plan, one ReadWithRetry call each — success or
+// failure both count, each is one real read) it took to cover
+// datapointsRead data points this pass.
+type OnPollCycle func(deviceID int64, durationMs int64, datapointsRead int, blockReads int, at time.Time)
 
 // reconnectFloorDelay is the minimum wait between Connect() retries after a
 // connection failure, used when conn.NextDeviceDelayMs is very small — the
@@ -144,11 +147,11 @@ func (p *Poller) runConnectionWithClient(ctx context.Context, conn connection.Co
 			client.SetUnitID(byte(dg.device.SlaveID))
 			now := time.Now().UTC()
 			deviceStart := time.Now()
-			readCount := p.readDevice(ctx, client, dg.device, dg.dps, readCtxTimeout, now)
+			readCount, blockReads := p.readDevice(ctx, client, dg.device, dg.dps, readCtxTimeout, now)
 
 			if readCount > 0 {
 				if p.onPollCycle != nil {
-					p.onPollCycle(dg.device.ID, time.Since(deviceStart).Milliseconds(), readCount, now)
+					p.onPollCycle(dg.device.ID, time.Since(deviceStart).Milliseconds(), readCount, blockReads, now)
 				}
 				if !wait(delay) {
 					_ = client.Close()
@@ -167,10 +170,12 @@ func (p *Poller) runConnectionWithClient(ctx context.Context, conn connection.Co
 // readDevice performs all of one device's planned block reads for a single
 // pass and returns how many datapoints were actually read (0 on a
 // connection-level failure — the caller treats that as "no bus traffic
-// occurred," skipping the inter-device delay).
-func (p *Poller) readDevice(ctx context.Context, client modbus.Client, d device.Device, dps []datapoint.DataPoint, readCtxTimeout time.Duration, eventTime time.Time) int {
-	readCount := 0
+// occurred," skipping the inter-device delay) and how many physical Modbus
+// requests (one ReadWithRetry call per planBlockReads block, success or
+// failure both count as one real read) that took.
+func (p *Poller) readDevice(ctx context.Context, client modbus.Client, d device.Device, dps []datapoint.DataPoint, readCtxTimeout time.Duration, eventTime time.Time) (readCount int, blockReads int) {
 	for _, block := range planBlockReads(dps) {
+		blockReads++
 		readCtx, cancel := context.WithTimeout(ctx, readCtxTimeout)
 		start := time.Now()
 		raw, attempts, err := modbus.ReadWithRetry(readCtx, client, block.functionCode, block.startAddress, block.quantity, 0)
@@ -198,7 +203,7 @@ func (p *Poller) readDevice(ctx context.Context, client modbus.Client, d device.
 			readCount++
 		}
 	}
-	return readCount
+	return readCount, blockReads
 }
 
 // decodeAndEmit slices dp's own bytes out of a block read's shared raw

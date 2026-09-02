@@ -217,14 +217,14 @@ export function DevicesPage() {
                   <td style={styles.td}>
                     {d.last_poll_duration_ms != null ? (
                       <span
-                        title={`${d.datapoints_polled ?? 0} data point(s) read in the last poll cycle`}
+                        title={`${d.datapoints_polled ?? 0} data point(s) read using ${d.block_reads ?? '?'} physical Modbus request(s) in the last poll cycle`}
                         style={
                           connectionDelay(d.connection_id) != null && d.last_poll_duration_ms > connectionDelay(d.connection_id)!
                             ? { color: '#C0392B', fontWeight: 600 }
                             : undefined
                         }
                       >
-                        {fmtNum(d.last_poll_duration_ms)} ms ({d.datapoints_polled ?? 0} pts)
+                        {fmtNum(d.last_poll_duration_ms)} ms ({d.datapoints_polled ?? 0} pts, {d.block_reads ?? '?'} reads)
                       </span>
                     ) : (
                       <span style={styles.muted}>—</span>

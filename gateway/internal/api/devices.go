@@ -25,13 +25,15 @@ type deviceDTO struct {
 	Status   string `json:"status,omitempty"`
 	LastSeen string `json:"last_seen,omitempty"`
 
-	// LastPollDurationMs/DatapointsPolled reflect the most recent full poll
-	// cycle for this device (see acquisition.OnPollCycle) — for tuning a
-	// connection's next_device_delay_ms against real hardware response
-	// times. Zero/absent until the device has completed at least one poll
-	// cycle.
+	// LastPollDurationMs/DatapointsPolled/BlockReads reflect the most recent
+	// full poll cycle for this device (see acquisition.OnPollCycle) — for
+	// tuning a connection's next_device_delay_ms against real hardware
+	// response times, and for seeing how well block-read merging is working
+	// (BlockReads vs. DatapointsPolled). Zero/absent until the device has
+	// completed at least one poll cycle.
 	LastPollDurationMs *int64 `json:"last_poll_duration_ms,omitempty"`
 	DatapointsPolled   int    `json:"datapoints_polled,omitempty"`
+	BlockReads         int    `json:"block_reads,omitempty"`
 }
 
 func (s *Server) toDeviceDTO(d device.Device) deviceDTO {
@@ -48,6 +50,7 @@ func (s *Server) toDeviceDTO(d device.Device) deviceDTO {
 		if info.DatapointsPolled > 0 {
 			dto.LastPollDurationMs = &info.LastPollDurationMs
 			dto.DatapointsPolled = info.DatapointsPolled
+			dto.BlockReads = info.BlockReads
 		}
 	}
 	return dto

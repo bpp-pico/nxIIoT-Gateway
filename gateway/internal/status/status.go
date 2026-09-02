@@ -12,12 +12,16 @@ type Info struct {
 	Quality  string
 	LastSeen time.Time
 
-	// LastPollDurationMs/DatapointsPolled describe the most recent full
-	// poll cycle for this device (every enabled data point whose turn came
-	// up on that tick — see acquisition.OnPollCycle), for the Web UI's
-	// per-device polling-timing display.
+	// LastPollDurationMs/DatapointsPolled/BlockReads describe the most
+	// recent full poll cycle for this device (every enabled data point
+	// whose turn came up on that tick — see acquisition.OnPollCycle), for
+	// the Web UI's per-device polling-timing display. BlockReads is how
+	// many separate physical Modbus requests it took to cover
+	// DatapointsPolled data points (block-read merging means this is
+	// usually fewer than DatapointsPolled, not equal to it).
 	LastPollDurationMs int64
 	DatapointsPolled   int
+	BlockReads         int
 }
 
 type Store struct {
@@ -41,12 +45,13 @@ func (s *Store) Update(deviceID int64, quality string, at time.Time) {
 // UpdatePollTiming records the most recent poll cycle's timing for a device,
 // leaving its Quality/LastSeen (set separately, per data point, via Update)
 // untouched.
-func (s *Store) UpdatePollTiming(deviceID int64, durationMs int64, datapointsPolled int) {
+func (s *Store) UpdatePollTiming(deviceID int64, durationMs int64, datapointsPolled int, blockReads int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	info := s.m[deviceID]
 	info.LastPollDurationMs = durationMs
 	info.DatapointsPolled = datapointsPolled
+	info.BlockReads = blockReads
 	s.m[deviceID] = info
 }
 

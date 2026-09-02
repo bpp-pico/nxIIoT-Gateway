@@ -29,6 +29,7 @@ export interface Device {
   last_seen?: string
   last_poll_duration_ms?: number
   datapoints_polled?: number
+  block_reads?: number
 }
 
 export interface DataPoint {

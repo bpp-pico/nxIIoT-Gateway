@@ -353,3 +353,90 @@ func TestRunConnectionYieldsOnceAfterEachFullPass(t *testing.T) {
 		t.Fatalf("expected cycleYieldDelay to bound passes to roughly settle/yield (~5-6), got %d reads — yield may not be applied", reads)
 	}
 }
+
+// pollCycleCall captures one OnPollCycle invocation for assertions.
+type pollCycleCall struct {
+	deviceID       int64
+	datapointsRead int
+	blockReads     int
+}
+
+// TestOnPollCycleReportsBlockReadsSeparatelyFromDatapointsRead proves the
+// Web UI's "how many requests did it take to cover every tag" question
+// (block-read merging vs. one-request-per-datapoint) is answerable from
+// OnPollCycle's own parameters, not just inferred from planBlockReads
+// separately — deviceA's two adjacent datapoints merge into 1 physical
+// read for 2 datapoints; deviceB's two far-apart datapoints (well past
+// maxGapRegisters) stay as 2 separate reads for 2 datapoints.
+func TestOnPollCycleReportsBlockReadsSeparatelyFromDatapointsRead(t *testing.T) {
+	client := &fakeClient{}
+
+	devA := device.Device{ID: 1, Name: "A", ConnectionID: 1, SlaveID: 1, Enabled: true}
+	devB := device.Device{ID: 2, Name: "B", ConnectionID: 1, SlaveID: 2, Enabled: true}
+	devices := []deviceWithPoints{
+		{device: devA, dps: []datapoint.DataPoint{
+			uint16DataPoint(1, devA.ID, "a1", 100),
+			uint16DataPoint(2, devA.ID, "a2", 101), // adjacent to a1 — should merge into 1 block
+		}},
+		{device: devB, dps: []datapoint.DataPoint{
+			uint16DataPoint(3, devB.ID, "b1", 100),
+			uint16DataPoint(4, devB.ID, "b2", 500), // far past maxGapRegisters — stays 2 blocks
+		}},
+	}
+
+	var mu sync.Mutex
+	var calls []pollCycleCall
+	p := &Poller{
+		log:       testLogger(),
+		onReading: func(Reading) {},
+		onPollCycle: func(deviceID int64, _ int64, datapointsRead int, blockReads int, _ time.Time) {
+			mu.Lock()
+			defer mu.Unlock()
+			calls = append(calls, pollCycleCall{deviceID: deviceID, datapointsRead: datapointsRead, blockReads: blockReads})
+		},
+	}
+
+	conn := connection.Connection{ID: 1, Name: "test-conn", Protocol: connection.RTU, Interface: "/dev/ttyUSB0",
+		BaudRate: 9600, DataBits: 8, Parity: "N", StopBits: 1, TimeoutMs: 200, Retry: 0, Enabled: true,
+		NextDeviceDelayMs: 0}
+
+	origYield := cycleYieldDelay
+	cycleYieldDelay = 0
+	t.Cleanup(func() { cycleYieldDelay = origYield })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		p.runConnectionWithClient(ctx, conn, devices, client)
+	}()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	wg.Wait()
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) == 0 {
+		t.Fatal("expected at least one OnPollCycle call")
+	}
+
+	var sawA, sawB bool
+	for _, c := range calls {
+		switch c.deviceID {
+		case devA.ID:
+			sawA = true
+			if c.datapointsRead != 2 || c.blockReads != 1 {
+				t.Errorf("device A: datapointsRead=%d blockReads=%d, want 2 and 1 (adjacent registers should merge)", c.datapointsRead, c.blockReads)
+			}
+		case devB.ID:
+			sawB = true
+			if c.datapointsRead != 2 || c.blockReads != 2 {
+				t.Errorf("device B: datapointsRead=%d blockReads=%d, want 2 and 2 (far-apart registers should not merge)", c.datapointsRead, c.blockReads)
+			}
+		}
+	}
+	if !sawA || !sawB {
+		t.Fatalf("expected OnPollCycle calls for both devices, sawA=%v sawB=%v", sawA, sawB)
+	}
+}

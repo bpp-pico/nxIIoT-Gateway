@@ -123,8 +123,8 @@ func main() {
 		} else {
 			log.Warn("reading", "device", r.DeviceName, "tag", r.Tag, "quality", r.Quality)
 		}
-	}, func(deviceID int64, durationMs int64, datapointsRead int, at time.Time) {
-		statusStore.UpdatePollTiming(deviceID, durationMs, datapointsRead)
+	}, func(deviceID int64, durationMs int64, datapointsRead int, blockReads int, at time.Time) {
+		statusStore.UpdatePollTiming(deviceID, durationMs, datapointsRead, blockReads)
 	}, diagStore)
 	if err := manager.Reload(ctx); err != nil {
 		log.Error("failed to start acquisition", "error", err)
