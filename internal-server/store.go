@@ -45,8 +45,23 @@ CREATE TABLE IF NOT EXISTS readings (
 CREATE INDEX IF NOT EXISTS idx_readings_gateway_time ON readings (gateway_id, event_timestamp DESC);
 `
 
+// idx_readings_latest supports the DISTINCT ON (gateway_id, device_id,
+// datapoint_id) ... ORDER BY ..., received_at DESC query in latest() below.
+// Without it, that query has no index to satisfy its ORDER BY and falls
+// back to a full sort of the whole table, which on production data volume
+// (millions of rows) blows past the 5s request timeout every time
+// (observed live: "query latest failed" error="timeout: context deadline
+// exceeded"). Built CONCURRENTLY, and as its own statement outside the
+// `schema` multi-statement Exec, because CREATE INDEX CONCURRENTLY cannot
+// run inside a transaction block — this avoids taking a write lock on the
+// live readings table while the gateway is still ingesting.
+const latestIndexSQL = `CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_readings_latest ON readings (gateway_id, device_id, datapoint_id, received_at DESC)`
+
 func (s *store) migrate(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, schema)
+	if _, err := s.pool.Exec(ctx, schema); err != nil {
+		return err
+	}
+	_, err := s.pool.Exec(ctx, latestIndexSQL)
 	return err
 }
 

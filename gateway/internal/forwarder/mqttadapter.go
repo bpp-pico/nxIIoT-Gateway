@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -201,6 +202,18 @@ func (a *MQTTAdapter) RunReconnectWatchdog(ctx context.Context) {
 	}
 }
 
+// isPahoAlreadyReconnectingErr reports whether err is paho's internal
+// status-transition guard rejecting Client.Connect() because its own
+// AutoReconnect/ConnectRetry goroutine already moved the client out of the
+// "disconnected" state on its own. Matched by message because
+// paho.mqtt.golang (pinned at v1.5.1, see go.mod) keeps this as an
+// unexported sentinel (errStatusMustBeDisconnected in its status.go) rather
+// than a public API — re-verify this string against that file if the paho
+// dependency version ever changes.
+func isPahoAlreadyReconnectingErr(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "status can only transition to connecting from disconnected")
+}
+
 func (a *MQTTAdapter) checkAndForceReconnect() {
 	if a.client.IsConnectionOpen() {
 		return
@@ -214,11 +227,28 @@ func (a *MQTTAdapter) checkAndForceReconnect() {
 	}
 
 	a.log.Warn("mqtt client disconnected too long, forcing reconnect", "disconnected_for", time.Since(stuckSince))
-	a.client.Disconnect(250)
 	token := a.client.Connect()
 	token.WaitTimeout(a.cfg.ConnectTimeout)
 	if err := token.Error(); err != nil {
-		a.log.Error("mqtt: forced reconnect attempt failed, will retry at next watchdog tick", "error", err)
+		if isPahoAlreadyReconnectingErr(err) {
+			// paho's own AutoReconnect/ConnectRetry goroutine is already
+			// mid-attempt (its internal status is "connecting" or
+			// "reconnecting", not "disconnected") -- this is proof paho is
+			// actively retrying on its own, not the silent-stall scenario
+			// this watchdog exists to fix (see doc comment above). This
+			// used to be misclassified as a failure, and worse, was
+			// preceded by an unconditional client.Disconnect(250) call that
+			// tore down paho's legitimate in-flight attempt every single
+			// tick -- observed live on 2026-09-02 forcing ~9 hours of
+			// otherwise-healthy paho retries to restart from scratch once
+			// a minute, every attempt rejected with
+			// "status can only transition to connecting from disconnected"
+			// (see MEMORY.md). Removed the preemptive Disconnect() and
+			// treat this specific error as a no-op instead of an error.
+			a.log.Info("mqtt: paho already reconnecting on its own, watchdog took no action", "disconnected_for", time.Since(stuckSince))
+		} else {
+			a.log.Error("mqtt: forced reconnect attempt failed, will retry at next watchdog tick", "error", err)
+		}
 	}
 
 	if !a.client.IsConnectionOpen() {
