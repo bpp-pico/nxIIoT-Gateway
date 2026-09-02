@@ -21,7 +21,18 @@ func Open(path string, migrationsDir string, log *slog.Logger) (*sql.DB, error) 
 		}
 	}
 
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)", path)
+	// _txlock=immediate: every explicit BeginTx in this codebase (queue.Insert,
+	// FetchBatch, MarkFailed) reads rows and then writes to them in the same
+	// transaction. With more than one open connection (see SetMaxOpenConns
+	// below), SQLite's default "deferred" transaction only takes a read lock
+	// up front and tries to upgrade to a write lock later — if another
+	// connection commits a write in between, that upgrade fails with
+	// SQLITE_BUSY_SNAPSHOT (517), which busy_timeout does NOT retry (the
+	// read snapshot is genuinely stale, not just contended). "immediate"
+	// takes the write lock at BEGIN, before any read, so no other writer can
+	// land in the middle — this was caught live, in production, immediately
+	// after raising the pool below (see MEMORY.md's 2026-09-02 entries).
+	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)&_txlock=immediate", path)
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

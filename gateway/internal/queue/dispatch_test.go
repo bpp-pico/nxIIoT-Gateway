@@ -2,6 +2,7 @@ package queue_test
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -199,6 +200,79 @@ func TestRecoverSendingToPending(t *testing.T) {
 	}
 	if status != "PENDING" {
 		t.Errorf("status = %q, want PENDING", status)
+	}
+}
+
+// TestConcurrentInsertsAndFetchBatchDoNotHitBusySnapshot reproduces a real
+// live-production incident (2026-09-02, see MEMORY.md): after raising
+// storage.Open's connection pool above 1, FetchBatch's SELECT-then-UPDATE
+// transaction started failing every single time with SQLITE_BUSY_SNAPSHOT
+// (517) the moment a concurrent Insert() landed between its read and write —
+// exactly this shape of interleaving. Fixed via _txlock=immediate (storage.go),
+// which takes FetchBatch's write lock at BEGIN instead of after the SELECT.
+// This test drives real concurrent Insert/FetchBatch/MarkSent traffic against
+// an on-disk (not :memory:) database, matching production's storage.Open
+// config, and fails on any error from any goroutine.
+func TestConcurrentInsertsAndFetchBatchDoNotHitBusySnapshot(t *testing.T) {
+	ctx := context.Background()
+	_, repo := openTestDB(t)
+	if err := repo.EnsureGateway(ctx, "GW001", "Test Gateway"); err != nil {
+		t.Fatalf("EnsureGateway: %v", err)
+	}
+
+	const inserters = 4
+	const insertsEach = 50
+	const fetchers = 2
+	const fetchesEach = 100
+
+	var wg sync.WaitGroup
+	errs := make(chan error, inserters*insertsEach+fetchers*fetchesEach)
+
+	wg.Add(inserters)
+	for i := 0; i < inserters; i++ {
+		go func() {
+			defer wg.Done()
+			v := 1.0
+			for j := 0; j < insertsEach; j++ {
+				if _, err := repo.Insert(ctx, queue.Entry{
+					GatewayID: "GW001", DeviceID: 1, DatapointID: 1,
+					Value: &v, Quality: "GOOD", EventTimestamp: time.Now(), Priority: "NORMAL",
+				}); err != nil {
+					errs <- err
+				}
+			}
+		}()
+	}
+
+	wg.Add(fetchers)
+	for i := 0; i < fetchers; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < fetchesEach; j++ {
+				batch, err := repo.FetchBatch(ctx, 5)
+				if err != nil {
+					errs <- err
+					continue
+				}
+				if len(batch) == 0 {
+					continue
+				}
+				ids := make([]int64, len(batch))
+				for k, e := range batch {
+					ids[k] = e.ID
+				}
+				if err := repo.MarkSent(ctx, ids); err != nil {
+					errs <- err
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errs)
+
+	for err := range errs {
+		t.Errorf("concurrent DB operation failed: %v", err)
 	}
 }
 
