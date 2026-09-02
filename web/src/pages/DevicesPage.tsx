@@ -195,11 +195,12 @@ export function DevicesPage() {
                       title="Click to view/manage this device's data points"
                       style={{
                         ...styles.smallButton,
-                        border: 'none',
-                        padding: 0,
-                        background: 'transparent',
-                        color: color.accent,
-                        fontWeight: selectedDeviceId === d.id ? 700 : 600,
+                        border: `1px solid ${selectedDeviceId === d.id ? color.accent : 'transparent'}`,
+                        borderRadius: 999,
+                        padding: '0.35rem 0.85rem',
+                        background: selectedDeviceId === d.id ? color.accent : color.accentWash,
+                        color: selectedDeviceId === d.id ? '#fff' : color.accent,
+                        fontWeight: 700,
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: 6,
@@ -207,7 +208,7 @@ export function DevicesPage() {
                       onClick={() => setSelectedDeviceId(selectedDeviceId === d.id ? null : d.id)}
                     >
                       <span style={{ fontSize: '0.7em', transform: selectedDeviceId === d.id ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
-                      <span style={{ textDecoration: 'underline', textUnderlineOffset: 3 }}>{d.name}</span>
+                      {d.name}
                     </button>
                   </td>
                   <td style={styles.td}>{connectionName(d.connection_id)}</td>
