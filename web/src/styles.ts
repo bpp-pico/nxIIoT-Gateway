@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react'
 
 // Modern Minimal design system — pastel purple + clean white.
 // Palette (light-only; this is an internal ops tool, no dark mode requested).
-const color = {
+export const color = {
   bg: '#FAFAFF',
   surface: '#FFFFFF',
   border: '#ECE9F7',

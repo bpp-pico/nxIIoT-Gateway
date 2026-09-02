@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import type { Connection, Device } from '../types'
-import { styles, qualityBadgeStyle } from '../styles'
+import { styles, qualityBadgeStyle, color } from '../styles'
 import { Icon } from '../icons'
 import { Modal } from '../components/Modal'
 import { ConnectionForm } from '../components/ConnectionForm'
@@ -192,10 +192,22 @@ export function DevicesPage() {
                 <tr key={d.id}>
                   <td style={styles.td}>
                     <button
-                      style={{ ...styles.smallButton, border: 'none', padding: 0, background: 'transparent', color: '#1E1B2E', fontWeight: selectedDeviceId === d.id ? 700 : 600 }}
+                      title="Click to view/manage this device's data points"
+                      style={{
+                        ...styles.smallButton,
+                        border: 'none',
+                        padding: 0,
+                        background: 'transparent',
+                        color: color.accent,
+                        fontWeight: selectedDeviceId === d.id ? 700 : 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
                       onClick={() => setSelectedDeviceId(selectedDeviceId === d.id ? null : d.id)}
                     >
-                      {d.name}
+                      <span style={{ fontSize: '0.7em', transform: selectedDeviceId === d.id ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>▶</span>
+                      <span style={{ textDecoration: 'underline', textUnderlineOffset: 3 }}>{d.name}</span>
                     </button>
                   </td>
                   <td style={styles.td}>{connectionName(d.connection_id)}</td>
