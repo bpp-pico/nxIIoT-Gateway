@@ -162,9 +162,15 @@ type gatewayStat struct {
 	GatewayID    string    `json:"gateway_id"`
 	Count        int64     `json:"count"`
 	LastReceived time.Time `json:"last_received"`
+	// Online is a last-seen-data heuristic, not a live connection check:
+	// true when LastReceived is within onlineThreshold of now. A gateway
+	// that's genuinely connected but has nothing to report (e.g. every
+	// device disabled) would show as offline here — accepted tradeoff for
+	// not needing any gateway-side change (see spec.md's design note).
+	Online bool `json:"online"`
 }
 
-func (s *store) stats(ctx context.Context) ([]gatewayStat, error) {
+func (s *store) stats(ctx context.Context, onlineThreshold time.Duration) ([]gatewayStat, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT gateway_id, count(*), max(received_at)
 		FROM readings
@@ -182,6 +188,7 @@ func (s *store) stats(ctx context.Context) ([]gatewayStat, error) {
 		if err := rows.Scan(&g.GatewayID, &g.Count, &g.LastReceived); err != nil {
 			return nil, err
 		}
+		g.Online = time.Since(g.LastReceived) <= onlineThreshold
 		out = append(out, g)
 	}
 	return out, rows.Err()

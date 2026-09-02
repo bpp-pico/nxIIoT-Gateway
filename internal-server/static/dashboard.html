@@ -257,7 +257,7 @@
       <h2>Gateways</h2>
       <table id="stats-table">
         <thead>
-          <tr><th>Gateway</th><th class="num">Readings</th><th>Last received</th></tr>
+          <tr><th>Gateway</th><th>Status</th><th class="num">Readings</th><th>Last received</th></tr>
         </thead>
         <tbody id="stats-body"></tbody>
       </table>
@@ -401,7 +401,8 @@ async function renderStats() {
 
   body.innerHTML = stats.map(s => `
     <tr>
-      <td>${s.gateway_id}</td>
+      <td>${escapeHTML(s.gateway_id)}</td>
+      <td><span class="badge ${s.online ? 'good' : 'bad'}"><span class="dot"></span>${s.online ? 'Online' : 'Offline'}</span></td>
       <td class="num">${s.count.toLocaleString()}</td>
       <td>${relTime(s.last_received)}</td>
     </tr>`).join('');

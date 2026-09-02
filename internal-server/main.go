@@ -43,7 +43,7 @@ func main() {
 	}
 	defer c.Disconnect()
 
-	srv := newHTTPServer(cfg.HTTPAddr, st, c, log)
+	srv := newHTTPServer(cfg.HTTPAddr, st, c, log, time.Duration(cfg.GatewayOnlineThresholdSeconds)*time.Second)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Error("http server failed", "error", err)

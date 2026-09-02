@@ -15,6 +15,10 @@ services:
       - MQTT_DATA_TOPIC_FILTER=gateway/+/data
       - DATABASE_URL=postgres://internal_server:internal_server@postgres:5432/internal_server?sslmode=disable
       - HTTP_ADDR=:9100
+      # A gateway is shown "online" on the dashboard if its most recent
+      # ingested reading is newer than this — last-seen-data, not a live
+      # connection check (see store.go's gatewayStat.Online comment).
+      - GATEWAY_ONLINE_THRESHOLD_SECONDS=60
     depends_on:
       postgres:
         condition: service_healthy

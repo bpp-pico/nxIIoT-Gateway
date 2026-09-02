@@ -13,7 +13,7 @@ import (
 //go:embed static/dashboard.html
 var dashboardHTML embed.FS
 
-func newHTTPServer(addr string, st *store, c *consumer, log *slog.Logger) *http.Server {
+func newHTTPServer(addr string, st *store, c *consumer, log *slog.Logger, onlineThreshold time.Duration) *http.Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +72,7 @@ func newHTTPServer(addr string, st *store, c *consumer, log *slog.Logger) *http.
 	mux.HandleFunc("GET /stats", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		rows, err := st.stats(ctx)
+		rows, err := st.stats(ctx, onlineThreshold)
 		if err != nil {
 			log.Error("query stats failed", "error", err)
 			http.Error(w, "internal error", http.StatusInternalServerError)
