@@ -20,6 +20,7 @@ type storeForwardStatusDTO struct {
 	ServerConnected    bool       `json:"server_connected"`
 	ServerLastError    string     `json:"server_last_error,omitempty"`
 	ServerLastSentAt   *time.Time `json:"server_last_sent_at,omitempty"`
+	RetentionDays      int        `json:"retention_days"`
 }
 
 func (s *Server) getStoreForwardStatus(w http.ResponseWriter, r *http.Request) {
@@ -35,6 +36,7 @@ func (s *Server) getStoreForwardStatus(w http.ResponseWriter, r *http.Request) {
 		OldestPending:  stats.OldestPending,
 		NewestPending:  stats.NewestPending,
 		RetryCount:     stats.TotalRetries,
+		RetentionDays:  s.cfg.Queue.RetentionDays,
 	}
 
 	if pct, err := storage.DiskUsagePercent(s.cfg.Database.Path); err == nil {

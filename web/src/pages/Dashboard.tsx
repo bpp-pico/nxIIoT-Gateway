@@ -166,6 +166,13 @@ export function Dashboard() {
 
         <div style={styles.card}>
           <div style={styles.cardIcon}><Icon name="clock" /></div>
+          <div style={styles.cardTitle}>Retention Period</div>
+          <div style={styles.cardValue}>{storeForward.retention_days != null ? `${storeForward.retention_days} days` : '—'}</div>
+          <div style={styles.cardSub}>how long sent records are kept</div>
+        </div>
+
+        <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="clock" /></div>
           <div style={styles.cardTitle}>Time Synchronization</div>
           <div style={styles.cardValue}>
             <span style={timeQualityBadgeStyle(time.time_quality)}>

@@ -95,6 +95,9 @@ export interface StoreForwardStatus {
   server_connected: boolean
   server_last_error?: string
   server_last_sent_at?: string
+  // Optional: a gateway build from before this field existed won't send it
+  // (the Web UI hot-reloads independently of the Go binary here).
+  retention_days?: number
 }
 
 export interface TimeStatus {

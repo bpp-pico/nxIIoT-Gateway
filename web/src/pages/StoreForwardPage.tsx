@@ -75,6 +75,13 @@ export function StoreForwardPage() {
             </div>
 
             <div style={styles.card}>
+              <div style={styles.cardIcon}><Icon name="clock" /></div>
+              <div style={styles.cardTitle}>Retention Period</div>
+              <div style={styles.cardValue}>{status.retention_days != null ? `${status.retention_days} days` : '—'}</div>
+              <div style={styles.cardSub}>how long SENT records are kept before being purged</div>
+            </div>
+
+            <div style={styles.card}>
               <div style={styles.cardIcon}><Icon name="storage" /></div>
               <div style={styles.cardTitle}>Storage Usage</div>
               <div style={styles.cardValue}>
