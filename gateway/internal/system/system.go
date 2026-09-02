@@ -4,6 +4,7 @@
 package system
 
 import (
+	"os"
 	"runtime"
 	"time"
 
@@ -31,6 +32,7 @@ type Info struct {
 	DiskUsedGB   *float64 `json:"disk_used_gb,omitempty"`
 	NetBytesSent *uint64  `json:"net_bytes_sent,omitempty"`
 	NetBytesRecv *uint64  `json:"net_bytes_recv,omitempty"`
+	DBSizeBytes  *int64   `json:"database_size_bytes,omitempty"`
 }
 
 // Current samples host resource usage in addition to Go runtime info.
@@ -68,6 +70,23 @@ func Current(diskPath string) Info {
 			info.DiskUsedPct = &usedPct
 			info.DiskTotalGB = &totalGB
 			info.DiskUsedGB = &usedGB
+		}
+
+		// SQLite in WAL mode (see storage.Open) keeps most of a file's
+		// actual on-disk footprint in the main file, plus whatever hasn't
+		// been checkpointed yet in -wal (and a small -shm index) — sum all
+		// three for a size that matches what `ls -la` on the data
+		// directory actually shows, not just the main file alone.
+		var dbSize int64
+		found := false
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			if fi, err := os.Stat(diskPath + suffix); err == nil {
+				dbSize += fi.Size()
+				found = true
+			}
+		}
+		if found {
+			info.DBSizeBytes = &dbSize
 		}
 	}
 

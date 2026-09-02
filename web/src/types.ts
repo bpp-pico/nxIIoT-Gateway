@@ -75,6 +75,7 @@ export interface SystemInfo {
   disk_used_gb?: number
   net_bytes_sent?: number
   net_bytes_recv?: number
+  database_size_bytes?: number
 }
 
 export interface DashboardSummary {
@@ -160,6 +161,12 @@ export interface Settings {
     ntp_server: string
     timezone: string
     sync_interval_seconds: number
+  }
+  // Optional: absent when talking to a gateway build from before this field
+  // existed (a real possibility here — the Web UI hot-reloads on `git pull`
+  // independently of the Go binary, which needs a manual rebuild+swap).
+  queue?: {
+    retention_days: number
   }
 }
 

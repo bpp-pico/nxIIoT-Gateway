@@ -38,14 +38,24 @@ export function ConfigPage() {
 // the gateway process restarts to apply them (the "simpler and safer"
 // option: no live-reload of the MQTT client or Time Service in place).
 // ---------------------------------------------------------------------
+// Once loaded, queue is always normalized to a concrete value (see the
+// getSettings().then below) even though the wire type leaves it optional
+// for backward compatibility with older gateway builds.
+type LoadedSettings = Settings & { queue: NonNullable<Settings['queue']> }
+
 function SettingsSection() {
-  const [settings, setSettings] = useState<Settings | null>(null)
+  const [settings, setSettings] = useState<LoadedSettings | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [restarting, setRestarting] = useState(false)
 
   useEffect(() => {
-    api.getSettings().then(setSettings).catch((err) => setError(String(err instanceof Error ? err.message : err)))
+    api
+      .getSettings()
+      // Default queue.retention_days when talking to an older gateway build
+      // that doesn't send it yet, so the form always has a value to show.
+      .then((s) => setSettings({ ...s, queue: s.queue ?? { retention_days: 30 } }))
+      .catch((err) => setError(String(err instanceof Error ? err.message : err)))
   }, [])
 
   // Once the save triggers a restart, poll /api/system until it answers
@@ -216,6 +226,24 @@ function SettingsSection() {
               }
             />
           </div>
+        </div>
+
+        <div style={styles.card}>
+          <div style={styles.cardTitle}>Store &amp; Forward</div>
+          <div style={styles.formRow}>
+            <label style={styles.label}>Retention (days)</label>
+            <input
+              type="number"
+              min={1}
+              style={styles.input}
+              value={settings.queue.retention_days}
+              onChange={(e) => setSettings({ ...settings, queue: { ...settings.queue, retention_days: Number(e.target.value) } })}
+            />
+          </div>
+          <p style={{ ...styles.muted, marginTop: '0.35rem', marginBottom: 0 }}>
+            How long a successfully-sent (SENT) reading stays in the local database before being purged. Does not
+            affect data still pending delivery.
+          </p>
         </div>
       </div>
 

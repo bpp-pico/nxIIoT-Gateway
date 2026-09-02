@@ -117,6 +117,13 @@ export function Dashboard() {
         </div>
 
         <div style={styles.card}>
+          <div style={styles.cardIcon}><Icon name="storage" /></div>
+          <div style={styles.cardTitle}>Database Size</div>
+          <div style={styles.cardValue}>{fmtBytes(system.database_size_bytes)}</div>
+          <div style={styles.cardSub}>gateway.db, incl. WAL</div>
+        </div>
+
+        <div style={styles.card}>
           <div style={styles.cardIcon}><Icon name="network" /></div>
           <div style={styles.cardTitle}>Network (cumulative)</div>
           <div style={styles.cardValue}>{fmtBytes(system.net_bytes_sent)}</div>

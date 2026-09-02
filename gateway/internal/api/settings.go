@@ -12,9 +12,9 @@ import (
 )
 
 // settingsDTO covers the config.yaml fields the user asked to edit from
-// the Web UI (Gateway identity, MQTT broker, Time/NTP) — everything else
-// in config.yaml (database path, queue thresholds, forwarder batch
-// tuning, log level) stays file-only, no UI surface for it.
+// the Web UI (Gateway identity, MQTT broker, Time/NTP, queue retention) —
+// everything else in config.yaml (database path, other queue thresholds,
+// forwarder batch tuning, log level) stays file-only, no UI surface for it.
 type settingsDTO struct {
 	Gateway struct {
 		ID   string `json:"id"`
@@ -37,6 +37,9 @@ type settingsDTO struct {
 		Timezone        string `json:"timezone"`
 		SyncIntervalSec int    `json:"sync_interval_seconds"`
 	} `json:"time"`
+	Queue struct {
+		RetentionDays int `json:"retention_days"`
+	} `json:"queue"`
 }
 
 // normalizeNTPServer strips a leading /etc/ntp.conf-style "server "/"pool "
@@ -77,6 +80,7 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
 	dto.Time.NTPServer = s.cfg.Time.NTPServer
 	dto.Time.Timezone = s.cfg.Time.Timezone
 	dto.Time.SyncIntervalSec = s.cfg.Time.SyncIntervalSec
+	dto.Queue.RetentionDays = s.cfg.Queue.RetentionDays
 	writeJSON(w, http.StatusOK, dto)
 }
 
@@ -134,6 +138,9 @@ func (s *Server) saveSettings(w http.ResponseWriter, r *http.Request) {
 	s.cfg.Time.Timezone = dto.Time.Timezone
 	if dto.Time.SyncIntervalSec > 0 {
 		s.cfg.Time.SyncIntervalSec = dto.Time.SyncIntervalSec
+	}
+	if dto.Queue.RetentionDays > 0 {
+		s.cfg.Queue.RetentionDays = dto.Queue.RetentionDays
 	}
 
 	if s.configPath == "" {
