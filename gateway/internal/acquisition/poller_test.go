@@ -60,6 +60,9 @@ func (f *fakeClient) SetUnitID(id byte) {
 	f.unitIDCalls = append(f.unitIDCalls, id)
 }
 
+// Read looks up a response by the block's own start address — seeded by
+// the test to cover the whole merged range's bytes, not per-datapoint,
+// since planBlockReads may combine several datapoints into one call.
 func (f *fakeClient) Read(ctx context.Context, fc modbus.FunctionCode, address, quantity uint16) ([]byte, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -68,6 +71,12 @@ func (f *fakeClient) Read(ctx context.Context, fc modbus.FunctionCode, address, 
 		return raw, nil
 	}
 	return make([]byte, quantity*2), nil
+}
+
+func (f *fakeClient) connectHitCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.connectHits
 }
 
 func (f *fakeClient) snapshotUnitIDCalls() []byte {
@@ -90,19 +99,19 @@ func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
-func uint16DataPoint(id, deviceID int64, tag string, address uint16, intervalMs int) datapoint.DataPoint {
+func uint16DataPoint(id, deviceID int64, tag string, address uint16) datapoint.DataPoint {
 	return datapoint.DataPoint{
 		ID: id, DeviceID: deviceID, TagName: tag,
 		FunctionCode: uint8(modbus.FuncReadHoldingRegisters), RegisterAddress: address,
 		DataType: string(modbus.UInt16), ByteOrder: "AB",
-		Scale: 1, Offset: 0, PollingIntervalMs: intervalMs, Enabled: true,
+		Scale: 1, Offset: 0, Enabled: true,
 	}
 }
 
-// runConnectionWithFake wires a Poller to a fake modbus.Client by swapping
+// runPollWithFakeClient wires a Poller to a fake modbus.Client by swapping
 // BuildClient's normal RTU/TCP construction for a fixed fake — runConnection
 // itself doesn't know or care which Client implementation it got.
-func runPollWithFakeClient(t *testing.T, client *fakeClient, devices []deviceWithPoints, settle time.Duration) []Reading {
+func runPollWithFakeClient(t *testing.T, client *fakeClient, devices []deviceWithPoints, nextDeviceDelayMs int, settle time.Duration) []Reading {
 	t.Helper()
 
 	var mu sync.Mutex
@@ -117,7 +126,8 @@ func runPollWithFakeClient(t *testing.T, client *fakeClient, devices []deviceWit
 	}
 
 	conn := connection.Connection{ID: 1, Name: "test-conn", Protocol: connection.RTU, Interface: "/dev/ttyUSB0",
-		BaudRate: 9600, DataBits: 8, Parity: "N", StopBits: 1, TimeoutMs: 200, Retry: 0, Enabled: true}
+		BaudRate: 9600, DataBits: 8, Parity: "N", StopBits: 1, TimeoutMs: 200, Retry: 0, Enabled: true,
+		NextDeviceDelayMs: nextDeviceDelayMs}
 
 	// runConnection calls the package-level BuildClient, which this test
 	// can't intercept without a real serial device — so it drives the
@@ -145,14 +155,17 @@ func runPollWithFakeClient(t *testing.T, client *fakeClient, devices []deviceWit
 func TestRunConnectionSharesOneClientAcrossDevicesInDeviceOrder(t *testing.T) {
 	client := &fakeClient{}
 
-	devA := device.Device{ID: 1, Name: "Temp-Humidity Sensor", ConnectionID: 1, SlaveID: 1, PollingIntervalMs: 5000, Enabled: true}
-	devB := device.Device{ID: 2, Name: "PM", ConnectionID: 1, SlaveID: 2, PollingIntervalMs: 5000, Enabled: true}
+	devA := device.Device{ID: 1, Name: "Temp-Humidity Sensor", ConnectionID: 1, SlaveID: 1, Enabled: true}
+	devB := device.Device{ID: 2, Name: "PM", ConnectionID: 1, SlaveID: 2, Enabled: true}
 	devices := []deviceWithPoints{
-		{device: devA, dps: []datapoint.DataPoint{uint16DataPoint(1, devA.ID, "tempC", 100, 5000)}},
-		{device: devB, dps: []datapoint.DataPoint{uint16DataPoint(2, devB.ID, "pm25", 200, 5000)}},
+		{device: devA, dps: []datapoint.DataPoint{uint16DataPoint(1, devA.ID, "tempC", 100)}},
+		{device: devB, dps: []datapoint.DataPoint{uint16DataPoint(2, devB.ID, "pm25", 200)}},
 	}
 
-	readings := runPollWithFakeClient(t, client, devices, 50*time.Millisecond)
+	// A 100ms delay with a 150ms settle window allows exactly one full
+	// pass (A's read, 100ms wait, B's read) before cancellation lands
+	// mid-wait after B — keeping this to exactly one read per device.
+	readings := runPollWithFakeClient(t, client, devices, 100, 150*time.Millisecond)
 
 	unitCalls := client.snapshotUnitIDCalls()
 	if len(unitCalls) != 2 || unitCalls[0] != 1 || unitCalls[1] != 2 {
@@ -180,48 +193,75 @@ func TestRunConnectionSharesOneClientAcrossDevicesInDeviceOrder(t *testing.T) {
 	}
 }
 
-func TestRunConnectionGatesEachDeviceByItsOwnPollingInterval(t *testing.T) {
+// TestRunConnectionRoundRobinsContinuouslyWithDelayBetweenDevices proves the
+// core of the new scan model: no ticker, no per-device/per-datapoint
+// interval gating — just a continuous loop through every device, wrapping
+// back to the first after the last, paced only by
+// connection.NextDeviceDelayMs between devices.
+func TestRunConnectionRoundRobinsContinuouslyWithDelayBetweenDevices(t *testing.T) {
 	client := &fakeClient{}
 
-	fast := device.Device{ID: 1, Name: "fast", ConnectionID: 1, SlaveID: 1, PollingIntervalMs: 20, Enabled: true}
-	slow := device.Device{ID: 2, Name: "slow", ConnectionID: 1, SlaveID: 2, PollingIntervalMs: 2000, Enabled: true}
+	devA := device.Device{ID: 1, Name: "A", ConnectionID: 1, SlaveID: 1, Enabled: true}
+	devB := device.Device{ID: 2, Name: "B", ConnectionID: 1, SlaveID: 2, Enabled: true}
+	devC := device.Device{ID: 3, Name: "C", ConnectionID: 1, SlaveID: 3, Enabled: true}
 	devices := []deviceWithPoints{
-		{device: fast, dps: []datapoint.DataPoint{uint16DataPoint(1, fast.ID, "fastTag", 100, 20)}},
-		{device: slow, dps: []datapoint.DataPoint{uint16DataPoint(2, slow.ID, "slowTag", 200, 2000)}},
+		{device: devA, dps: []datapoint.DataPoint{uint16DataPoint(1, devA.ID, "a", 100)}},
+		{device: devB, dps: []datapoint.DataPoint{uint16DataPoint(2, devB.ID, "b", 200)}},
+		{device: devC, dps: []datapoint.DataPoint{uint16DataPoint(3, devC.ID, "c", 300)}},
 	}
 
-	runPollWithFakeClient(t, client, devices, 120*time.Millisecond)
+	// 10ms delay between devices, settle for 150ms — enough for several
+	// full A->B->C->A... cycles, proving both the wraparound and that the
+	// delay is actually being waited (not skipped/zero).
+	runPollWithFakeClient(t, client, devices, 10, 150*time.Millisecond)
 
 	reads := client.snapshotReadCalls()
-	var fastReads, slowReads int
+	var aCount, bCount, cCount int
 	for _, rc := range reads {
 		switch rc.address {
 		case 100:
-			fastReads++
+			aCount++
 		case 200:
-			slowReads++
+			bCount++
+		case 300:
+			cCount++
 		}
 	}
 
-	if slowReads != 1 {
-		t.Fatalf("expected the slow (2000ms) device to be read exactly once (the initial poll), got %d", slowReads)
+	if aCount < 2 || bCount < 2 || cCount < 2 {
+		t.Fatalf("expected every device to be polled more than once (round-robin wraparound) within 150ms at a 10ms delay, got a=%d b=%d c=%d", aCount, bCount, cCount)
 	}
-	if fastReads < 2 {
-		t.Fatalf("expected the fast (20ms) device to be read more than once within 120ms, got %d", fastReads)
+	// Devices are always read in the same relative order each cycle
+	// (A, B, C, A, B, C, ...) since the shared client is never touched
+	// concurrently — spot check the first 6 reads follow that pattern.
+	if len(reads) >= 6 {
+		wantAddrs := []uint16{100, 200, 300, 100, 200, 300}
+		for i, want := range wantAddrs {
+			if reads[i].address != want {
+				t.Fatalf("expected read %d to be at address %d (round-robin order), got %+v", i, want, reads[i])
+			}
+		}
 	}
 }
 
 func TestRunConnectionConnectFailureMarksEveryDeviceOnItOffline(t *testing.T) {
 	client := &fakeClient{connectErr: errors.New("connection refused")}
 
-	devA := device.Device{ID: 1, Name: "Temp-Humidity Sensor", ConnectionID: 1, SlaveID: 1, PollingIntervalMs: 5000, Enabled: true}
-	devB := device.Device{ID: 2, Name: "PM", ConnectionID: 1, SlaveID: 2, PollingIntervalMs: 5000, Enabled: true}
+	devA := device.Device{ID: 1, Name: "Temp-Humidity Sensor", ConnectionID: 1, SlaveID: 1, Enabled: true}
+	devB := device.Device{ID: 2, Name: "PM", ConnectionID: 1, SlaveID: 2, Enabled: true}
 	devices := []deviceWithPoints{
-		{device: devA, dps: []datapoint.DataPoint{uint16DataPoint(1, devA.ID, "tempC", 100, 5000)}},
-		{device: devB, dps: []datapoint.DataPoint{uint16DataPoint(2, devB.ID, "pm25", 200, 5000)}},
+		{device: devA, dps: []datapoint.DataPoint{uint16DataPoint(1, devA.ID, "tempC", 100)}},
+		{device: devB, dps: []datapoint.DataPoint{uint16DataPoint(2, devB.ID, "pm25", 200)}},
 	}
 
-	readings := runPollWithFakeClient(t, client, devices, 50*time.Millisecond)
+	// reconnectFloorDelay defaults to 1s (see poller.go) — shrink it for
+	// this test so it doesn't need a full real second to observe the
+	// (single, since settle < floor) connect attempt.
+	orig := reconnectFloorDelay
+	reconnectFloorDelay = 20 * time.Millisecond
+	t.Cleanup(func() { reconnectFloorDelay = orig })
+
+	readings := runPollWithFakeClient(t, client, devices, 500, 10*time.Millisecond)
 
 	if len(readings) != 2 {
 		t.Fatalf("expected one bad reading per device on connect failure, got %d: %+v", len(readings), readings)
@@ -233,5 +273,29 @@ func TestRunConnectionConnectFailureMarksEveryDeviceOnItOffline(t *testing.T) {
 	}
 	if len(client.snapshotReadCalls()) != 0 {
 		t.Fatalf("expected no reads to be attempted after a connect failure")
+	}
+}
+
+// TestRunConnectionRetriesConnectAfterFloorDelay proves the new model
+// doesn't just fail once and stop — since there's no ticker to naturally
+// pace a retry anymore, checkAndForceReconnect's floor delay is what keeps
+// it trying (without hammering a genuinely-down broker/bus in a tight
+// spin loop).
+func TestRunConnectionRetriesConnectAfterFloorDelay(t *testing.T) {
+	client := &fakeClient{connectErr: errors.New("connection refused")}
+
+	devA := device.Device{ID: 1, Name: "A", ConnectionID: 1, SlaveID: 1, Enabled: true}
+	devices := []deviceWithPoints{
+		{device: devA, dps: []datapoint.DataPoint{uint16DataPoint(1, devA.ID, "a", 100)}},
+	}
+
+	orig := reconnectFloorDelay
+	reconnectFloorDelay = 15 * time.Millisecond
+	t.Cleanup(func() { reconnectFloorDelay = orig })
+
+	runPollWithFakeClient(t, client, devices, 500, 100*time.Millisecond)
+
+	if hits := client.connectHitCount(); hits < 2 {
+		t.Fatalf("expected more than one Connect() attempt (retry after the floor delay), got %d", hits)
 	}
 }

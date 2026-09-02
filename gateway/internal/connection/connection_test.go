@@ -32,7 +32,7 @@ func sampleRTUConnection() connection.Connection {
 	return connection.Connection{
 		Name: "USB-RS485", Protocol: connection.RTU, Interface: "/dev/ttyUSB0",
 		BaudRate: 9600, DataBits: 8, Parity: "N", StopBits: 1,
-		TimeoutMs: 1000, Retry: 3, Enabled: true,
+		TimeoutMs: 1000, Retry: 3, Enabled: true, NextDeviceDelayMs: 250,
 	}
 }
 
@@ -49,7 +49,7 @@ func TestConnectionCreateAndGet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Name != "USB-RS485" || got.Interface != "/dev/ttyUSB0" || got.BaudRate != 9600 {
+	if got.Name != "USB-RS485" || got.Interface != "/dev/ttyUSB0" || got.BaudRate != 9600 || got.NextDeviceDelayMs != 250 {
 		t.Fatalf("unexpected connection: %+v", got)
 	}
 }
@@ -101,6 +101,7 @@ func TestConnectionUpdate(t *testing.T) {
 
 	updated := sampleRTUConnection()
 	updated.BaudRate = 19200
+	updated.NextDeviceDelayMs = 500
 	if err := repo.Update(ctx, id, updated); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -111,6 +112,9 @@ func TestConnectionUpdate(t *testing.T) {
 	}
 	if got.BaudRate != 19200 {
 		t.Fatalf("expected updated baud_rate 19200, got %d", got.BaudRate)
+	}
+	if got.NextDeviceDelayMs != 500 {
+		t.Fatalf("expected updated next_device_delay_ms 500, got %d", got.NextDeviceDelayMs)
 	}
 }
 
@@ -123,8 +127,8 @@ func TestConnectionDeleteBlockedWhileDeviceReferencesIt(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if _, err := db.ExecContext(ctx, `INSERT INTO device (name, connection_id, slave_id, polling_interval_ms, enabled) VALUES (?, ?, ?, ?, ?)`,
-		"dependent device", id, 1, 1000, 1); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO device (name, connection_id, slave_id, enabled) VALUES (?, ?, ?, ?)`,
+		"dependent device", id, 1, 1); err != nil {
 		t.Fatalf("seed dependent device: %v", err)
 	}
 

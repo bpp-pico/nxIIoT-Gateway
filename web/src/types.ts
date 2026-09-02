@@ -16,6 +16,7 @@ export interface Connection {
   timeout_ms: number
   retry: number
   enabled: boolean
+  next_device_delay_ms: number
 }
 
 export interface Device {
@@ -23,7 +24,6 @@ export interface Device {
   name: string
   connection_id: number
   slave_id: number
-  polling_interval_ms: number
   enabled: boolean
   status?: string
   last_seen?: string
@@ -43,7 +43,6 @@ export interface DataPoint {
   scale: number
   offset: number
   unit?: string
-  polling_interval_ms: number
   priority?: Priority
   enabled: boolean
 }

@@ -22,11 +22,19 @@ import (
 type OnReading func(Reading)
 
 // OnPollCycle is called once per device after its data points have been
-// polled for the current cycle (i.e. only on ticks where the device's own
-// polling_interval_ms gate lets it through), reporting how long that took —
-// for the Web UI's per-device polling-timing display, so intervals can be
-// tuned against real hardware response times instead of guessed.
+// polled for the current round-robin pass, reporting how long that took —
+// for the Web UI's per-device polling-timing display, so a connection's
+// next_device_delay_ms can be tuned against real hardware response times
+// instead of guessed.
 type OnPollCycle func(deviceID int64, durationMs int64, datapointsRead int, at time.Time)
+
+// reconnectFloorDelay is the minimum wait between Connect() retries after a
+// connection failure, used when conn.NextDeviceDelayMs is very small — the
+// continuous scan loop has no ticker to naturally pace reconnect attempts
+// anymore, so this stops a down broker/bus from being hammered in a tight
+// spin loop. Not a const so tests can shrink it instead of running real-time
+// for a full second.
+var reconnectFloorDelay = time.Second
 
 // deviceWithPoints pairs a device with its enabled data points, for polling
 // within one connection's shared goroutine.
@@ -68,118 +76,137 @@ func (p *Poller) runConnection(ctx context.Context, conn connection.Connection, 
 
 // runConnectionWithClient is runConnection's body, taking an already-built
 // Client so tests can substitute a fake instead of a real serial/TCP handle.
+//
+// Continuous round-robin scan: devices are polled back-to-back, in order,
+// wrapping to the first device after the last, with no ticker and no
+// per-device/per-datapoint interval gating (see gateway/migrations/
+// 0005_scan_polling.sql — replaces the old two-level polling_interval_ms
+// scheme). The only pacing is conn.NextDeviceDelayMs, waited between
+// devices to give the bus time to settle (RS-485 turnaround, primarily).
 func (p *Poller) runConnectionWithClient(ctx context.Context, conn connection.Connection, devices []deviceWithPoints, client modbus.Client) {
-	// Tick at least as often as the fastest device on this connection
-	// needs — the per-device gate below still limits each device to its
-	// own configured interval, so a device sharing a connection with a
-	// faster sibling doesn't get polled any faster than it asked for, it
-	// just gets *checked* more often (cheap; matches the pre-existing
-	// per-datapoint gating pattern this generalizes, see MEMORY.md's note
-	// on polling_interval_ms existing at two levels).
-	interval := time.Duration(0)
-	for _, dg := range devices {
-		di := time.Duration(dg.device.PollingIntervalMs) * time.Millisecond
-		if di <= 0 {
-			di = time.Second
-		}
-		if interval == 0 || di < interval {
-			interval = di
-		}
-	}
-	if interval <= 0 {
-		interval = time.Second
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
 	connected := false
-	lastPolledDevice := make(map[int64]time.Time, len(devices))
-	lastPolledPoint := make(map[int64]time.Time)
+	readCtxTimeout := time.Duration(conn.TimeoutMs) * time.Millisecond
+	delay := time.Duration(conn.NextDeviceDelayMs) * time.Millisecond
 
-	poll := func() {
-		now := time.Now().UTC()
+	// wait blocks for d, but returns early (false) if ctx is cancelled —
+	// used both for the inter-device delay and the reconnect floor delay,
+	// deliberately never a blind time.Sleep, so shutdown/Reload stays
+	// responsive even while "waiting."
+	wait := func(d time.Duration) bool {
+		if d <= 0 {
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(d):
+			return true
+		}
+	}
+
+	for {
+		if ctx.Err() != nil {
+			_ = client.Close()
+			return
+		}
 
 		if !connected {
 			if err := client.Connect(); err != nil {
+				now := time.Now().UTC()
 				for _, dg := range devices {
 					p.emitDeviceOffline(dg.device, dg.dps, now, err)
 				}
-				return
+				if !wait(reconnectFloorDelay) {
+					_ = client.Close()
+					return
+				}
+				continue
 			}
 			connected = true
 		}
 
 		for _, dg := range devices {
-			di := time.Duration(dg.device.PollingIntervalMs) * time.Millisecond
-			if di <= 0 {
-				di = time.Second
+			if ctx.Err() != nil {
+				_ = client.Close()
+				return
 			}
-			if last, ok := lastPolledDevice[dg.device.ID]; ok && now.Sub(last) < di {
-				continue
-			}
-			lastPolledDevice[dg.device.ID] = now
+
 			client.SetUnitID(byte(dg.device.SlaveID))
-
+			now := time.Now().UTC()
 			deviceStart := time.Now()
-			readCount := 0
-			for _, dp := range dg.dps {
-				dpInterval := time.Duration(dp.PollingIntervalMs) * time.Millisecond
-				if last, ok := lastPolledPoint[dp.ID]; ok && now.Sub(last) < dpInterval {
-					continue
+			readCount := p.readDevice(ctx, client, dg.device, dg.dps, readCtxTimeout, now)
+
+			if readCount > 0 {
+				if p.onPollCycle != nil {
+					p.onPollCycle(dg.device.ID, time.Since(deviceStart).Milliseconds(), readCount, now)
 				}
-				lastPolledPoint[dp.ID] = now
-				p.readOne(ctx, client, dg.device, dp, now)
-				readCount++
+				if !wait(delay) {
+					_ = client.Close()
+					return
+				}
 			}
-			if readCount > 0 && p.onPollCycle != nil {
-				p.onPollCycle(dg.device.ID, time.Since(deviceStart).Milliseconds(), readCount, now)
-			}
-		}
-	}
-
-	// Read immediately on startup instead of waiting a full interval.
-	poll()
-
-	for {
-		select {
-		case <-ctx.Done():
-			_ = client.Close()
-			return
-		case <-ticker.C:
-			poll()
 		}
 	}
 }
 
-func (p *Poller) readOne(ctx context.Context, client modbus.Client, d device.Device, dp datapoint.DataPoint, eventTime time.Time) {
+// readDevice performs all of one device's planned block reads for a single
+// pass and returns how many datapoints were actually read (0 on a
+// connection-level failure — the caller treats that as "no bus traffic
+// occurred," skipping the inter-device delay).
+func (p *Poller) readDevice(ctx context.Context, client modbus.Client, d device.Device, dps []datapoint.DataPoint, readCtxTimeout time.Duration, eventTime time.Time) int {
+	readCount := 0
+	for _, block := range planBlockReads(dps) {
+		readCtx, cancel := context.WithTimeout(ctx, readCtxTimeout)
+		start := time.Now()
+		raw, attempts, err := modbus.ReadWithRetry(readCtx, client, block.functionCode, block.startAddress, block.quantity, 0)
+		elapsed := time.Since(start)
+		cancel()
+
+		if err != nil {
+			q := modbus.QualityFromError(err)
+			p.log.Warn("modbus read failed", "device", d.Name, "address", block.startAddress, "quantity", block.quantity, "quality", q, "error", err)
+			if p.diag != nil {
+				p.diag.RecordResult(q, elapsed, attempts)
+			}
+			for _, dp := range block.points {
+				p.onReading(p.badReading(d, dp, eventTime, q))
+			}
+			readCount += len(block.points)
+			continue
+		}
+		if p.diag != nil {
+			p.diag.RecordResult(modbus.Good, elapsed, attempts)
+		}
+
+		for _, dp := range block.points {
+			p.decodeAndEmit(d, dp, raw, block.startAddress, eventTime)
+			readCount++
+		}
+	}
+	return readCount
+}
+
+// decodeAndEmit slices dp's own bytes out of a block read's shared raw
+// buffer (offset by how far dp's register address sits from the block's
+// start) and decodes/scales/emits it exactly as a dedicated single-datapoint
+// read would have.
+func (p *Poller) decodeAndEmit(d device.Device, dp datapoint.DataPoint, raw []byte, blockStart uint16, eventTime time.Time) {
 	dt := modbus.DataType(dp.DataType)
-	qty, err := dt.RegisterCount()
+	width, err := dt.ByteWidth()
 	if err != nil {
 		p.log.Error("invalid data point configuration", "device", d.Name, "tag", dp.TagName, "error", err)
 		p.onReading(p.badReading(d, dp, eventTime, modbus.Invalid))
 		return
 	}
 
-	readCtx, cancel := context.WithTimeout(ctx, time.Duration(d.PollingIntervalMs)*time.Millisecond)
-	start := time.Now()
-	raw, attempts, err := modbus.ReadWithRetry(readCtx, client, modbus.FunctionCode(dp.FunctionCode), dp.RegisterAddress, qty, 0)
-	elapsed := time.Since(start)
-	cancel()
-
-	if err != nil {
-		q := modbus.QualityFromError(err)
-		p.log.Warn("modbus read failed", "device", d.Name, "tag", dp.TagName, "quality", q, "error", err)
-		if p.diag != nil {
-			p.diag.RecordResult(q, elapsed, attempts)
-		}
-		p.onReading(p.badReading(d, dp, eventTime, q))
+	offset := int(dp.RegisterAddress-blockStart) * 2
+	if offset < 0 || offset+width > len(raw) {
+		p.log.Error("data point falls outside its planned block read", "device", d.Name, "tag", dp.TagName)
+		p.onReading(p.badReading(d, dp, eventTime, modbus.Invalid))
 		return
 	}
-	if p.diag != nil {
-		p.diag.RecordResult(modbus.Good, elapsed, attempts)
-	}
 
-	decoded, err := modbus.Decode(raw, dt, dp.ByteOrder)
+	decoded, err := modbus.Decode(raw[offset:offset+width], dt, dp.ByteOrder)
 	if err != nil {
 		p.log.Error("decode failed", "device", d.Name, "tag", dp.TagName, "error", err)
 		p.onReading(p.badReading(d, dp, eventTime, modbus.Invalid))

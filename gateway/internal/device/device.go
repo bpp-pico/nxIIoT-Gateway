@@ -16,12 +16,11 @@ import (
 var ErrNotFound = errors.New("device not found")
 
 type Device struct {
-	ID                int64
-	Name              string
-	ConnectionID      int64
-	SlaveID           int
-	PollingIntervalMs int
-	Enabled           bool
+	ID           int64
+	Name         string
+	ConnectionID int64
+	SlaveID      int
+	Enabled      bool
 }
 
 // Validate checks the fields that are still device-level after the
@@ -37,9 +36,6 @@ func (d Device) Validate() error {
 	if d.SlaveID < 1 || d.SlaveID > 247 {
 		return fmt.Errorf("slave_id must be between 1 and 247")
 	}
-	if d.PollingIntervalMs <= 0 {
-		return fmt.Errorf("polling_interval_ms must be positive")
-	}
 	return nil
 }
 
@@ -51,13 +47,13 @@ func NewRepository(db *sql.DB) *Repository {
 	return &Repository{db: db}
 }
 
-const selectColumns = `id, name, connection_id, slave_id, polling_interval_ms, enabled`
+const selectColumns = `id, name, connection_id, slave_id, enabled`
 
 func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var d Device
 	var slaveID sql.NullInt64
 	var enabled int
-	err := row.Scan(&d.ID, &d.Name, &d.ConnectionID, &slaveID, &d.PollingIntervalMs, &enabled)
+	err := row.Scan(&d.ID, &d.Name, &d.ConnectionID, &slaveID, &enabled)
 	if err != nil {
 		return Device{}, err
 	}
@@ -124,9 +120,9 @@ func (r *Repository) Get(ctx context.Context, id int64) (Device, error) {
 // Create inserts a new device and returns its id.
 func (r *Repository) Create(ctx context.Context, d Device) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
-		INSERT INTO device (name, connection_id, slave_id, polling_interval_ms, enabled)
-		VALUES (?, ?, ?, ?, ?)`,
-		d.Name, d.ConnectionID, d.SlaveID, d.PollingIntervalMs, boolToInt(d.Enabled))
+		INSERT INTO device (name, connection_id, slave_id, enabled)
+		VALUES (?, ?, ?, ?)`,
+		d.Name, d.ConnectionID, d.SlaveID, boolToInt(d.Enabled))
 	if err != nil {
 		return 0, err
 	}
@@ -137,10 +133,10 @@ func (r *Repository) Create(ctx context.Context, d Device) (int64, error) {
 func (r *Repository) Update(ctx context.Context, id int64, d Device) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE device SET
-			name = ?, connection_id = ?, slave_id = ?, polling_interval_ms = ?, enabled = ?,
+			name = ?, connection_id = ?, slave_id = ?, enabled = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE id = ?`,
-		d.Name, d.ConnectionID, d.SlaveID, d.PollingIntervalMs, boolToInt(d.Enabled), id)
+		d.Name, d.ConnectionID, d.SlaveID, boolToInt(d.Enabled), id)
 	if err != nil {
 		return err
 	}

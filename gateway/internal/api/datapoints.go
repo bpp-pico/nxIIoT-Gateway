@@ -10,57 +10,54 @@ import (
 
 // dataPointDTO is the wire representation of a Data Point, per §6 Data Point Model.
 type dataPointDTO struct {
-	ID                int64   `json:"id"`
-	DeviceID          int64   `json:"device_id"`
-	TagName           string  `json:"tag_name"`
-	FunctionCode      uint8   `json:"function_code"`
-	RegisterAddress   uint16  `json:"register_address"`
-	DataType          string  `json:"data_type"`
-	ByteOrder         string  `json:"byte_order,omitempty"`
-	WordOrder         string  `json:"word_order,omitempty"`
-	Scale             float64 `json:"scale"`
-	Offset            float64 `json:"offset"`
-	Unit              string  `json:"unit,omitempty"`
-	PollingIntervalMs int     `json:"polling_interval_ms"`
-	Priority          string  `json:"priority,omitempty"`
-	Enabled           bool    `json:"enabled"`
+	ID              int64   `json:"id"`
+	DeviceID        int64   `json:"device_id"`
+	TagName         string  `json:"tag_name"`
+	FunctionCode    uint8   `json:"function_code"`
+	RegisterAddress uint16  `json:"register_address"`
+	DataType        string  `json:"data_type"`
+	ByteOrder       string  `json:"byte_order,omitempty"`
+	WordOrder       string  `json:"word_order,omitempty"`
+	Scale           float64 `json:"scale"`
+	Offset          float64 `json:"offset"`
+	Unit            string  `json:"unit,omitempty"`
+	Priority        string  `json:"priority,omitempty"`
+	Enabled         bool    `json:"enabled"`
 }
 
 func toDataPointDTO(dp datapoint.DataPoint) dataPointDTO {
 	return dataPointDTO{
-		ID:                dp.ID,
-		DeviceID:          dp.DeviceID,
-		TagName:           dp.TagName,
-		FunctionCode:      dp.FunctionCode,
-		RegisterAddress:   dp.RegisterAddress,
-		DataType:          dp.DataType,
-		ByteOrder:         dp.ByteOrder,
-		WordOrder:         dp.WordOrder,
-		Scale:             dp.Scale,
-		Offset:            dp.Offset,
-		Unit:              dp.Unit,
-		PollingIntervalMs: dp.PollingIntervalMs,
-		Priority:          string(dp.Priority),
-		Enabled:           dp.Enabled,
+		ID:              dp.ID,
+		DeviceID:        dp.DeviceID,
+		TagName:         dp.TagName,
+		FunctionCode:    dp.FunctionCode,
+		RegisterAddress: dp.RegisterAddress,
+		DataType:        dp.DataType,
+		ByteOrder:       dp.ByteOrder,
+		WordOrder:       dp.WordOrder,
+		Scale:           dp.Scale,
+		Offset:          dp.Offset,
+		Unit:            dp.Unit,
+		Priority:        string(dp.Priority),
+		Enabled:         dp.Enabled,
 	}
 }
 
 func (dto dataPointDTO) toDataPoint() datapoint.DataPoint {
 	return datapoint.DataPoint{
-		ID:                dto.ID,
-		DeviceID:          dto.DeviceID,
-		TagName:           dto.TagName,
-		FunctionCode:      dto.FunctionCode,
-		RegisterAddress:   dto.RegisterAddress,
-		DataType:          dto.DataType,
-		ByteOrder:         dto.ByteOrder,
-		WordOrder:         dto.WordOrder,
-		Scale:             dto.Scale,
-		Offset:            dto.Offset,
-		Unit:              dto.Unit,
-		PollingIntervalMs: dto.PollingIntervalMs,
-		Priority:          datapoint.Priority(dto.Priority),
-		Enabled:           dto.Enabled,
+		ID:              dto.ID,
+		DeviceID:        dto.DeviceID,
+		TagName:         dto.TagName,
+		FunctionCode:    dto.FunctionCode,
+		RegisterAddress: dto.RegisterAddress,
+		DataType:        dto.DataType,
+		ByteOrder:       dto.ByteOrder,
+		WordOrder:       dto.WordOrder,
+		Scale:           dto.Scale,
+		Offset:          dto.Offset,
+		Unit:            dto.Unit,
+		Priority:        datapoint.Priority(dto.Priority),
+		Enabled:         dto.Enabled,
 	}
 }
 

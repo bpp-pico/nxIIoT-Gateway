@@ -22,20 +22,19 @@ const (
 var ErrNotFound = errors.New("datapoint not found")
 
 type DataPoint struct {
-	ID                int64
-	DeviceID          int64
-	TagName           string
-	FunctionCode      uint8
-	RegisterAddress   uint16
-	DataType          string
-	ByteOrder         string
-	WordOrder         string
-	Scale             float64
-	Offset            float64
-	Unit              string
-	PollingIntervalMs int
-	Priority          Priority
-	Enabled           bool
+	ID              int64
+	DeviceID        int64
+	TagName         string
+	FunctionCode    uint8
+	RegisterAddress uint16
+	DataType        string
+	ByteOrder       string
+	WordOrder       string
+	Scale           float64
+	Offset          float64
+	Unit            string
+	Priority        Priority
+	Enabled         bool
 }
 
 // Validate checks the fields required by the Data Point Model (design doc §6).
@@ -56,9 +55,6 @@ func (dp DataPoint) Validate() error {
 	default:
 		return fmt.Errorf("priority must be one of CRITICAL, HIGH, NORMAL, LOW")
 	}
-	if dp.PollingIntervalMs <= 0 {
-		return fmt.Errorf("polling_interval_ms must be positive")
-	}
 	if dp.Scale == 0 {
 		return fmt.Errorf("scale must not be zero")
 	}
@@ -74,7 +70,7 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 const selectColumns = `id, device_id, tag_name, function_code, register_address, data_type,
-	byte_order, word_order, scale, offset, unit, polling_interval_ms, priority, enabled`
+	byte_order, word_order, scale, offset, unit, priority, enabled`
 
 func scanDataPoint(row interface{ Scan(...any) error }) (DataPoint, error) {
 	var dp DataPoint
@@ -82,7 +78,7 @@ func scanDataPoint(row interface{ Scan(...any) error }) (DataPoint, error) {
 	var enabled int
 	err := row.Scan(&dp.ID, &dp.DeviceID, &dp.TagName, &dp.FunctionCode, &dp.RegisterAddress,
 		&dp.DataType, &dp.ByteOrder, &dp.WordOrder, &dp.Scale, &dp.Offset, &unit,
-		&dp.PollingIntervalMs, &dp.Priority, &enabled)
+		&dp.Priority, &enabled)
 	if err != nil {
 		return DataPoint{}, err
 	}
@@ -144,10 +140,10 @@ func (r *Repository) Get(ctx context.Context, id int64) (DataPoint, error) {
 func (r *Repository) Create(ctx context.Context, dp DataPoint) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO datapoint (device_id, tag_name, function_code, register_address, data_type,
-		                        byte_order, word_order, scale, offset, unit, polling_interval_ms, priority, enabled)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		                        byte_order, word_order, scale, offset, unit, priority, enabled)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		dp.DeviceID, dp.TagName, dp.FunctionCode, dp.RegisterAddress, dp.DataType,
-		dp.ByteOrder, dp.WordOrder, dp.Scale, dp.Offset, nullable(dp.Unit), dp.PollingIntervalMs,
+		dp.ByteOrder, dp.WordOrder, dp.Scale, dp.Offset, nullable(dp.Unit),
 		priorityOrDefault(dp.Priority), boolToInt(dp.Enabled))
 	if err != nil {
 		return 0, err
@@ -161,12 +157,12 @@ func (r *Repository) Update(ctx context.Context, id int64, dp DataPoint) error {
 		UPDATE datapoint SET
 			tag_name = ?, function_code = ?, register_address = ?, data_type = ?,
 			byte_order = ?, word_order = ?, scale = ?, offset = ?, unit = ?,
-			polling_interval_ms = ?, priority = ?, enabled = ?,
+			priority = ?, enabled = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE id = ?`,
 		dp.TagName, dp.FunctionCode, dp.RegisterAddress, dp.DataType,
 		dp.ByteOrder, dp.WordOrder, dp.Scale, dp.Offset, nullable(dp.Unit),
-		dp.PollingIntervalMs, priorityOrDefault(dp.Priority), boolToInt(dp.Enabled), id)
+		priorityOrDefault(dp.Priority), boolToInt(dp.Enabled), id)
 	if err != nil {
 		return err
 	}

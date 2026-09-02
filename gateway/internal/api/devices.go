@@ -16,32 +16,31 @@ import (
 // connectionDTO now — a device only names its connection_id, slave id,
 // polling interval, and enabled flag.
 type deviceDTO struct {
-	ID                int64  `json:"id"`
-	Name              string `json:"name"`
-	ConnectionID      int64  `json:"connection_id"`
-	SlaveID           int    `json:"slave_id"`
-	PollingIntervalMs int    `json:"polling_interval_ms"`
-	Enabled           bool   `json:"enabled"`
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	ConnectionID int64  `json:"connection_id"`
+	SlaveID      int    `json:"slave_id"`
+	Enabled      bool   `json:"enabled"`
 
 	Status   string `json:"status,omitempty"`
 	LastSeen string `json:"last_seen,omitempty"`
 
 	// LastPollDurationMs/DatapointsPolled reflect the most recent full poll
-	// cycle for this device (see acquisition.OnPollCycle) — for tuning
-	// polling_interval_ms against real hardware response times. Zero/absent
-	// until the device has completed at least one poll cycle.
+	// cycle for this device (see acquisition.OnPollCycle) — for tuning a
+	// connection's next_device_delay_ms against real hardware response
+	// times. Zero/absent until the device has completed at least one poll
+	// cycle.
 	LastPollDurationMs *int64 `json:"last_poll_duration_ms,omitempty"`
 	DatapointsPolled   int    `json:"datapoints_polled,omitempty"`
 }
 
 func (s *Server) toDeviceDTO(d device.Device) deviceDTO {
 	dto := deviceDTO{
-		ID:                d.ID,
-		Name:              d.Name,
-		ConnectionID:      d.ConnectionID,
-		SlaveID:           d.SlaveID,
-		PollingIntervalMs: d.PollingIntervalMs,
-		Enabled:           d.Enabled,
+		ID:           d.ID,
+		Name:         d.Name,
+		ConnectionID: d.ConnectionID,
+		SlaveID:      d.SlaveID,
+		Enabled:      d.Enabled,
 	}
 	if info, ok := s.status.Get(d.ID); ok {
 		dto.Status = info.Quality
@@ -56,12 +55,11 @@ func (s *Server) toDeviceDTO(d device.Device) deviceDTO {
 
 func (dto deviceDTO) toDevice() device.Device {
 	return device.Device{
-		ID:                dto.ID,
-		Name:              dto.Name,
-		ConnectionID:      dto.ConnectionID,
-		SlaveID:           dto.SlaveID,
-		PollingIntervalMs: dto.PollingIntervalMs,
-		Enabled:           dto.Enabled,
+		ID:           dto.ID,
+		Name:         dto.Name,
+		ConnectionID: dto.ConnectionID,
+		SlaveID:      dto.SlaveID,
+		Enabled:      dto.Enabled,
 	}
 }
 

@@ -50,7 +50,7 @@ func seedConnection(t *testing.T, db *sql.DB) int64 {
 func sampleDevice(connID int64) device.Device {
 	return device.Device{
 		Name: "Temp-Humidity Sensor", ConnectionID: connID, SlaveID: 1,
-		PollingIntervalMs: 1000, Enabled: true,
+		Enabled: true,
 	}
 }
 
@@ -153,7 +153,7 @@ func TestDeviceUpdate(t *testing.T) {
 	}
 
 	updated := sampleDevice(connID)
-	updated.PollingIntervalMs = 500
+	updated.SlaveID = 7
 	if err := repo.Update(ctx, id, updated); err != nil {
 		t.Fatalf("Update: %v", err)
 	}
@@ -162,8 +162,8 @@ func TestDeviceUpdate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get after update: %v", err)
 	}
-	if got.PollingIntervalMs != 500 {
-		t.Fatalf("expected updated polling_interval_ms 500, got %d", got.PollingIntervalMs)
+	if got.SlaveID != 7 {
+		t.Fatalf("expected updated slave_id 7, got %d", got.SlaveID)
 	}
 }
 

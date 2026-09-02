@@ -36,6 +36,7 @@ export function DevicesPage() {
   }, [])
 
   const connectionName = (id: number) => connections.find((c) => c.id === id)?.name ?? `#${id}`
+  const connectionDelay = (id: number) => connections.find((c) => c.id === id)?.next_device_delay_ms
 
   const handleSaveConnection = async (connection: Partial<Connection>) => {
     if (editingConnection === 'new') {
@@ -177,7 +178,7 @@ export function DevicesPage() {
                 <th style={styles.th}>Name</th>
                 <th style={styles.th}>Connection</th>
                 <th style={styles.th}>Slave ID</th>
-                <th style={styles.th}>Polling</th>
+                <th style={styles.th}>Next-Device Delay</th>
                 <th style={styles.th}>Poll Time</th>
                 <th style={styles.th}>Enabled</th>
                 <th style={styles.th}>Status</th>
@@ -198,12 +199,16 @@ export function DevicesPage() {
                   </td>
                   <td style={styles.td}>{connectionName(d.connection_id)}</td>
                   <td style={styles.td}>{d.slave_id}</td>
-                  <td style={styles.td}>{d.polling_interval_ms} ms</td>
+                  <td style={styles.td}>{connectionDelay(d.connection_id) ?? '—'} ms</td>
                   <td style={styles.td}>
                     {d.last_poll_duration_ms != null ? (
                       <span
                         title={`${d.datapoints_polled ?? 0} data point(s) read in the last poll cycle`}
-                        style={d.last_poll_duration_ms > d.polling_interval_ms ? { color: '#C0392B', fontWeight: 600 } : undefined}
+                        style={
+                          connectionDelay(d.connection_id) != null && d.last_poll_duration_ms > connectionDelay(d.connection_id)!
+                            ? { color: '#C0392B', fontWeight: 600 }
+                            : undefined
+                        }
                       >
                         {d.last_poll_duration_ms} ms ({d.datapoints_polled ?? 0} pts)
                       </span>

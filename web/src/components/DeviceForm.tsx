@@ -13,7 +13,6 @@ const emptyForm = {
   name: '',
   connection_id: 0,
   slave_id: 1,
-  polling_interval_ms: 1000,
   enabled: true,
 }
 
@@ -91,16 +90,6 @@ export function DeviceForm({ initial, connections, onSubmit, onCancel }: DeviceF
           value={form.slave_id}
           onChange={(e) => set('slave_id', Number(e.target.value))}
           required
-        />
-      </div>
-
-      <div style={styles.formRow}>
-        <label style={styles.label}>Polling Interval (ms)</label>
-        <input
-          type="number"
-          style={styles.input}
-          value={form.polling_interval_ms}
-          onChange={(e) => set('polling_interval_ms', Number(e.target.value))}
         />
       </div>
 

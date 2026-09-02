@@ -42,6 +42,14 @@ type Connection struct {
 	Retry     int
 	Enabled   bool
 
+	// NextDeviceDelayMs is how long the poller waits after finishing one
+	// device's reads before moving to the next device sharing this
+	// connection — models RS-485 bus settle/turnaround time. Replaces the
+	// old per-device/per-datapoint polling_interval_ms scheme (see
+	// gateway/migrations/0005_scan_polling.sql): devices are now polled
+	// continuously, round-robin, as fast as the bus allows.
+	NextDeviceDelayMs int
+
 	// RTU-only
 	BaudRate int
 	DataBits int
@@ -83,6 +91,9 @@ func (c Connection) Validate() error {
 	if c.Retry < 0 {
 		return fmt.Errorf("retry must not be negative")
 	}
+	if c.NextDeviceDelayMs < 0 {
+		return fmt.Errorf("next_device_delay_ms must not be negative")
+	}
 	return nil
 }
 
@@ -95,7 +106,7 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 const selectColumns = `id, name, protocol, interface, ip_address, port,
-	timeout_ms, retry, enabled, baud_rate, data_bits, parity, stop_bits`
+	timeout_ms, retry, enabled, next_device_delay_ms, baud_rate, data_bits, parity, stop_bits`
 
 func scanConnection(row interface{ Scan(...any) error }) (Connection, error) {
 	var c Connection
@@ -103,7 +114,7 @@ func scanConnection(row interface{ Scan(...any) error }) (Connection, error) {
 	var port sql.NullInt64
 	var enabled int
 	err := row.Scan(&c.ID, &c.Name, &c.Protocol, &iface, &ip, &port,
-		&c.TimeoutMs, &c.Retry, &enabled,
+		&c.TimeoutMs, &c.Retry, &enabled, &c.NextDeviceDelayMs,
 		&c.BaudRate, &c.DataBits, &c.Parity, &c.StopBits)
 	if err != nil {
 		return Connection{}, err
@@ -160,11 +171,11 @@ func (r *Repository) Get(ctx context.Context, id int64) (Connection, error) {
 func (r *Repository) Create(ctx context.Context, c Connection) (int64, error) {
 	res, err := r.db.ExecContext(ctx, `
 		INSERT INTO connection (name, protocol, interface, ip_address, port,
-		                         timeout_ms, retry, enabled,
+		                         timeout_ms, retry, enabled, next_device_delay_ms,
 		                         baud_rate, data_bits, parity, stop_bits)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		c.Name, c.Protocol, nullable(c.Interface), nullable(c.IPAddress), c.Port,
-		c.TimeoutMs, c.Retry, boolToInt(c.Enabled),
+		c.TimeoutMs, c.Retry, boolToInt(c.Enabled), c.NextDeviceDelayMs,
 		c.BaudRate, c.DataBits, c.Parity, c.StopBits)
 	if err != nil {
 		return 0, err
@@ -177,12 +188,12 @@ func (r *Repository) Update(ctx context.Context, id int64, c Connection) error {
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE connection SET
 			name = ?, protocol = ?, interface = ?, ip_address = ?, port = ?,
-			timeout_ms = ?, retry = ?, enabled = ?,
+			timeout_ms = ?, retry = ?, enabled = ?, next_device_delay_ms = ?,
 			baud_rate = ?, data_bits = ?, parity = ?, stop_bits = ?,
 			updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE id = ?`,
 		c.Name, c.Protocol, nullable(c.Interface), nullable(c.IPAddress), c.Port,
-		c.TimeoutMs, c.Retry, boolToInt(c.Enabled),
+		c.TimeoutMs, c.Retry, boolToInt(c.Enabled), c.NextDeviceDelayMs,
 		c.BaudRate, c.DataBits, c.Parity, c.StopBits, id)
 	if err != nil {
 		return err

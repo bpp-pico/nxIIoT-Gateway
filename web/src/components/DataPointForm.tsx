@@ -18,7 +18,6 @@ const emptyForm = {
   scale: 1,
   offset: 0,
   unit: '',
-  polling_interval_ms: 1000,
   priority: 'NORMAL' as Priority,
   enabled: true,
 }
@@ -144,25 +143,14 @@ export function DataPointForm({ initial, onSubmit, onCancel }: DataPointFormProp
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.75rem' }}>
-        <div style={{ ...styles.formRow, flex: 1 }}>
-          <label style={styles.label}>Polling Interval (ms)</label>
-          <input
-            type="number"
-            style={styles.input}
-            value={form.polling_interval_ms}
-            onChange={(e) => set('polling_interval_ms', Number(e.target.value))}
-          />
-        </div>
-        <div style={{ ...styles.formRow, flex: 1 }}>
-          <label style={styles.label}>Priority</label>
-          <select style={styles.input} value={form.priority} onChange={(e) => set('priority', e.target.value as Priority)}>
-            <option value="CRITICAL">Critical</option>
-            <option value="HIGH">High</option>
-            <option value="NORMAL">Normal</option>
-            <option value="LOW">Low</option>
-          </select>
-        </div>
+      <div style={styles.formRow}>
+        <label style={styles.label}>Priority</label>
+        <select style={styles.input} value={form.priority} onChange={(e) => set('priority', e.target.value as Priority)}>
+          <option value="CRITICAL">Critical</option>
+          <option value="HIGH">High</option>
+          <option value="NORMAL">Normal</option>
+          <option value="LOW">Low</option>
+        </select>
       </div>
 
       <div style={{ ...styles.formRow, flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>

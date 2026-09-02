@@ -63,10 +63,19 @@ func TestMigration0004SplitsDeviceIntoConnectionAgainstSeededData(t *testing.T) 
 		t.Fatalf("close pre-0004 db: %v", err)
 	}
 
-	// Step 2: re-open the SAME db file through the real migrations
-	// directory (which now includes 0004) — schema_migrations already
-	// records 0001-0003 as applied, so only 0004 runs, against real data.
-	db, err = storage.Open(dbPath, "../../migrations", log)
+	// Step 2: re-open the SAME db file through a migrations dir scoped to
+	// just 0001-0004 (not the full "../../migrations", which now also
+	// includes 0005 onward — this test is specifically about 0004's own
+	// behavior in isolation, so later migrations must not run here too).
+	// schema_migrations already records 0001-0003 as applied, so only 0004
+	// runs, against real data.
+	postMigrationsDir := t.TempDir()
+	copyMigration(t, postMigrationsDir, "0001_init.sql")
+	copyMigration(t, postMigrationsDir, "0002_device_rtu_params.sql")
+	copyMigration(t, postMigrationsDir, "0003_data_queue_retry.sql")
+	copyMigration(t, postMigrationsDir, "0004_connection_split.sql")
+
+	db, err = storage.Open(dbPath, postMigrationsDir, log)
 	if err != nil {
 		t.Fatalf("apply 0004 against seeded db: %v", err)
 	}

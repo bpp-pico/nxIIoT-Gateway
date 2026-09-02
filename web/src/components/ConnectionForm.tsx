@@ -24,6 +24,7 @@ const emptyForm = {
   timeout_ms: 1000,
   retry: 3,
   enabled: true,
+  next_device_delay_ms: 250,
 }
 
 export function ConnectionForm({ initial, onSubmit, onCancel }: ConnectionFormProps) {
@@ -214,6 +215,21 @@ export function ConnectionForm({ initial, onSubmit, onCancel }: ConnectionFormPr
             onChange={(e) => set('retry', Number(e.target.value))}
           />
         </div>
+      </div>
+
+      <div style={styles.formRow}>
+        <label style={styles.label}>Delay Before Next Device (ms)</label>
+        <input
+          type="number"
+          style={styles.input}
+          value={form.next_device_delay_ms}
+          onChange={(e) => set('next_device_delay_ms', Number(e.target.value))}
+        />
+        <span style={styles.muted}>
+          How long the gateway waits after finishing one device's reads before moving to the next device sharing this
+          connection (bus settle/turnaround time). Devices on this connection are now polled continuously,
+          round-robin — there's no longer a separate per-device or per-tag interval to set.
+        </span>
       </div>
 
       <div style={{ ...styles.formRow, flexDirection: 'row', alignItems: 'center', gap: '0.5rem' }}>

@@ -22,44 +22,47 @@ type connectionDTO struct {
 	DataBits  int    `json:"data_bits,omitempty"`
 	Parity    string `json:"parity,omitempty"`
 	StopBits  int    `json:"stop_bits,omitempty"`
-	TimeoutMs int    `json:"timeout_ms"`
-	Retry     int    `json:"retry"`
-	Enabled   bool   `json:"enabled"`
+	TimeoutMs         int  `json:"timeout_ms"`
+	Retry             int  `json:"retry"`
+	Enabled           bool `json:"enabled"`
+	NextDeviceDelayMs int  `json:"next_device_delay_ms"`
 }
 
 func toConnectionDTO(c connection.Connection) connectionDTO {
 	return connectionDTO{
-		ID:        c.ID,
-		Name:      c.Name,
-		Protocol:  string(c.Protocol),
-		Interface: c.Interface,
-		IPAddress: c.IPAddress,
-		Port:      c.Port,
-		BaudRate:  c.BaudRate,
-		DataBits:  c.DataBits,
-		Parity:    c.Parity,
-		StopBits:  c.StopBits,
-		TimeoutMs: c.TimeoutMs,
-		Retry:     c.Retry,
-		Enabled:   c.Enabled,
+		ID:                c.ID,
+		Name:              c.Name,
+		Protocol:          string(c.Protocol),
+		Interface:         c.Interface,
+		IPAddress:         c.IPAddress,
+		Port:              c.Port,
+		BaudRate:          c.BaudRate,
+		DataBits:          c.DataBits,
+		Parity:            c.Parity,
+		StopBits:          c.StopBits,
+		TimeoutMs:         c.TimeoutMs,
+		Retry:             c.Retry,
+		Enabled:           c.Enabled,
+		NextDeviceDelayMs: c.NextDeviceDelayMs,
 	}
 }
 
 func (dto connectionDTO) toConnection() connection.Connection {
 	return connection.Connection{
-		ID:        dto.ID,
-		Name:      dto.Name,
-		Protocol:  connection.Protocol(dto.Protocol),
-		Interface: dto.Interface,
-		IPAddress: dto.IPAddress,
-		Port:      dto.Port,
-		BaudRate:  dto.BaudRate,
-		DataBits:  dto.DataBits,
-		Parity:    dto.Parity,
-		StopBits:  dto.StopBits,
-		TimeoutMs: dto.TimeoutMs,
-		Retry:     dto.Retry,
-		Enabled:   dto.Enabled,
+		ID:                dto.ID,
+		Name:              dto.Name,
+		Protocol:          connection.Protocol(dto.Protocol),
+		Interface:         dto.Interface,
+		IPAddress:         dto.IPAddress,
+		Port:              dto.Port,
+		BaudRate:          dto.BaudRate,
+		DataBits:          dto.DataBits,
+		Parity:            dto.Parity,
+		StopBits:          dto.StopBits,
+		TimeoutMs:         dto.TimeoutMs,
+		Retry:             dto.Retry,
+		Enabled:           dto.Enabled,
+		NextDeviceDelayMs: dto.NextDeviceDelayMs,
 	}
 }
 
